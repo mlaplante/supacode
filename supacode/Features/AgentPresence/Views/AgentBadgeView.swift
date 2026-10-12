@@ -30,6 +30,18 @@ enum AgentBadgeVisual: Equatable {
     case .awaitingInput, .normal: agent.displayName
     }
   }
+
+  /// Like `describing(_:)`, but folds in how long an attention state has lasted.
+  /// `since` is ignored for `compacting` and `normal`.
+  func describing(_ agent: SkillAgent, since: Date?, now: Date) -> String {
+    guard let since else { return describing(agent) }
+    let elapsed = ElapsedFormatter.spoken(from: since, to: now)
+    switch self {
+    case .awaitingInput: return "\(agent.displayName) awaiting input for \(elapsed)"
+    case .error: return "\(agent.displayName) stopped on an error \(elapsed) ago"
+    case .compacting, .normal: return describing(agent)
+    }
+  }
 }
 
 /// Circular badge with the agent's mark, styled by its presence `activity` (see
@@ -39,13 +51,20 @@ struct AgentBadgeView: View {
   let agent: SkillAgent
   let size: CGFloat
   let activity: AgentPresenceFeature.Activity
+  let since: Date?
   @Environment(\.pixelLength) private var pixelLength
   @Environment(\.colorScheme) private var colorScheme
 
-  init(agent: SkillAgent, size: CGFloat = 14, activity: AgentPresenceFeature.Activity = .idle) {
+  init(
+    agent: SkillAgent,
+    size: CGFloat = 14,
+    activity: AgentPresenceFeature.Activity = .idle,
+    since: Date? = nil
+  ) {
     self.agent = agent
     self.size = size
     self.activity = activity
+    self.since = since
   }
 
   var body: some View {
@@ -76,7 +95,13 @@ struct AgentBadgeView: View {
       .background(Self.badgeFill(visual).shadow(Self.dropShadow), in: .circle)
       .overlay(Circle().strokeBorder(.separator, lineWidth: pixelLength))
       .environment(\.colorScheme, resolvedScheme)
-      .help(visual.describing(agent))
+      .modifier(
+        ElapsedHelp(
+          visual: visual,
+          agent: agent,
+          since: visual == .awaitingInput || visual == .error ? since : nil
+        )
+      )
       .animation(.smooth, value: activity)
       .modifier(CompactingPulse(isActive: visual == .compacting))
   }
@@ -88,6 +113,24 @@ struct AgentBadgeView: View {
   private static let dropShadow: ShadowStyle = .drop(
     color: Color.black.opacity(0.05), radius: 1, x: 0, y: 1
   )
+}
+
+/// Tooltip that counts up for attention states; a plain static tooltip otherwise.
+/// The timeline lives in the view so the reducer never schedules display work.
+private struct ElapsedHelp: ViewModifier {
+  let visual: AgentBadgeVisual
+  let agent: SkillAgent
+  let since: Date?
+
+  func body(content: Content) -> some View {
+    if let since {
+      TimelineView(.periodic(from: since, by: 1)) { context in
+        content.help(visual.describing(agent, since: since, now: context.date))
+      }
+    } else {
+      content.help(visual.describing(agent))
+    }
+  }
 }
 
 /// Pulses the badge while the agent compacts context: it contracts, shivers, and

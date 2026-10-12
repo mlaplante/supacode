@@ -1,3 +1,4 @@
+import Foundation
 import SupacodeSettingsShared
 import Testing
 
@@ -18,5 +19,13 @@ struct AgentBadgeVisualTests {
     #expect(AgentBadgeVisual.error.describing(.claude) != SkillAgent.claude.displayName)
     #expect(AgentBadgeVisual.compacting.describing(.claude) != SkillAgent.claude.displayName)
     #expect(AgentBadgeVisual.normal.describing(.claude) == SkillAgent.claude.displayName)
+  }
+
+  @Test func describingIncludesElapsedForAttentionStates() {
+    let since = Date(timeIntervalSince1970: 0)
+    let now = since.addingTimeInterval(252)
+    #expect(AgentBadgeVisual.awaitingInput.describing(.claude, since: since, now: now) == "\(SkillAgent.claude.displayName) awaiting input for 4m 12s")
+    #expect(AgentBadgeVisual.error.describing(.codex, since: since, now: now) == "Codex stopped on an error 4m 12s ago")
+    #expect(AgentBadgeVisual.normal.describing(.claude, since: since, now: now) == SkillAgent.claude.displayName)
   }
 }
