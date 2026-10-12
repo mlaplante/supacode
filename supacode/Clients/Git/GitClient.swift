@@ -4,6 +4,10 @@ import Sentry
 import SupacodeSettingsShared
 
 enum GitOperation: String {
+  case aheadBehind = "ahead_behind"
+  case rebase = "rebase"
+  case mergeRef = "merge_ref"
+  case syncAbort = "sync_abort"
   case version = "version"
   case repoRoot = "repo_root"
   case worktreeList = "worktree_list"
@@ -1159,6 +1163,57 @@ struct GitClient {
       return (added: changes.added, removed: changes.removed)
     } catch {
       return nil
+    }
+  }
+
+  /// `HEAD...base` left/right count: left is commits only on HEAD (ahead),
+  /// right is commits only on base (behind). `nil` on any failure (unknown
+  /// base, locked index) so the caller keeps its last value.
+  nonisolated func aheadBehind(at worktreeURL: URL, base: String) async -> GitAheadBehind? {
+    let path = worktreeURL.path(percentEncoded: false)
+    guard
+      let output = try? await runGit(
+        operation: .aheadBehind,
+        arguments: ["-C", path, "rev-list", "--left-right", "--count", "HEAD...\(base)"])
+    else { return nil }
+    let parts = output.split(whereSeparator: { $0 == "\t" || $0 == " " || $0.isNewline })
+      .map { Int($0) }
+    guard parts.count == 2, let ahead = parts[0], let behind = parts[1] else { return nil }
+    return GitAheadBehind(ahead: ahead, behind: behind)
+  }
+
+  /// `git rebase <base>`; on failure runs `--abort` and throws `.conflict` so
+  /// the worktree is never left mid-rebase.
+  nonisolated func rebase(at worktreeURL: URL, onto base: String) async throws {
+    try await runSync(
+      .rebase, worktreeURL: worktreeURL, arguments: ["rebase", base], abortArguments: ["rebase", "--abort"])
+  }
+
+  /// `git merge --no-edit <base>`; on failure runs `--abort` and throws `.conflict`.
+  nonisolated func mergeBase(at worktreeURL: URL, base: String) async throws {
+    try await runSync(
+      .merge, worktreeURL: worktreeURL, arguments: ["merge", "--no-edit", base],
+      abortArguments: ["merge", "--abort"])
+  }
+
+  nonisolated private func runSync(
+    _ operation: GitSyncOperation, worktreeURL: URL, arguments: [String], abortArguments: [String]
+  ) async throws {
+    let path = worktreeURL.path(percentEncoded: false)
+    do {
+      _ = try await runGit(
+        operation: operation == .rebase ? .rebase : .mergeRef,
+        arguments: ["-C", path] + arguments,
+        localePinned: true)
+    } catch {
+      _ = try? await runGit(operation: .syncAbort, arguments: ["-C", path] + abortArguments, localePinned: true)
+      // `wrapShellError` folds stderr/stdout into the description, so the
+      // conflict text survives. The locale is pinned so it stays English.
+      let message = error.localizedDescription
+      if message.localizedCaseInsensitiveContains("conflict") {
+        throw GitSyncError.conflict(operation: operation)
+      }
+      throw GitSyncError.failed(message)
     }
   }
 

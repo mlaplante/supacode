@@ -84,6 +84,9 @@ struct GitClientDependency: Sendable {
   var isBareRepository: @Sendable (_ repoRoot: URL) async throws -> Bool
   var branchName: @Sendable (URL) async -> String?
   var lineChanges: @Sendable (URL) async -> (added: Int, removed: Int)?
+  var aheadBehind: @Sendable (URL, String) async -> GitAheadBehind?
+  var rebaseOnto: @Sendable (URL, String) async throws -> Void
+  var mergeBaseRef: @Sendable (URL, String) async throws -> Void
   /// Uncommitted status of a worktree for the files inspector. `nil` on a probe
   /// failure (caller keeps its last-good snapshot); an empty snapshot is clean.
   var fileStatus: @Sendable (URL) async -> GitStatusSnapshot?
@@ -279,6 +282,9 @@ extension GitClientDependency: DependencyKey {
       },
       branchName: { await GitClient(shell: shell).symbolicHeadBranch(at: $0) },
       lineChanges: { await GitClient(shell: shell).lineChanges(at: $0) },
+      aheadBehind: { url, base in await GitClient(shell: shell).aheadBehind(at: url, base: base) },
+      rebaseOnto: { url, base in try await GitClient(shell: shell).rebase(at: url, onto: base) },
+      mergeBaseRef: { url, base in try await GitClient(shell: shell).mergeBase(at: url, base: base) },
       fileStatus: { await GitClient(shell: shell).fileStatus(at: $0) },
       stageFile: { path, root in try await GitClient(shell: shell).stageFile(path, in: root) },
       unstageFile: { path, root in try await GitClient(shell: shell).unstageFile(path, in: root) },
@@ -322,6 +328,8 @@ extension GitClientDependency: DependencyKey {
     // No git status probe by default: fixtures with fake `/tmp/...` paths get a
     // no-op (nil) so the reducer never decorates. Status tests override this.
     value.fileStatus = { _ in nil }
+    // No ahead/behind probe by default so unstubbed reducer tests never shell out.
+    value.aheadBehind = { _, _ in nil }
     // `liveValue` shells out to real `git clone`; a no-op default keeps an
     // unstubbed test from cloning over the network. Clone tests override this.
     value.cloneStream = { _, _, _, _ in
