@@ -8,6 +8,7 @@ enum GitOperation: String {
   case rebase = "rebase"
   case mergeRef = "merge_ref"
   case syncAbort = "sync_abort"
+  case syncInProgressProbe = "sync_in_progress_probe"
   case version = "version"
   case repoRoot = "repo_root"
   case worktreeList = "worktree_list"
@@ -1200,6 +1201,9 @@ struct GitClient {
     _ operation: GitSyncOperation, worktreeURL: URL, arguments: [String], abortArguments: [String]
   ) async throws {
     let path = worktreeURL.path(percentEncoded: false)
+    // Never start on top of an operation the user (or another tool) began: the
+    // `--abort` below would destroy it.
+    try await ensureNoSyncInProgress(worktreeURL: worktreeURL)
     do {
       _ = try await runGit(
         operation: operation == .rebase ? .rebase : .mergeRef,
@@ -1214,6 +1218,30 @@ struct GitClient {
         throw GitSyncError.conflict(operation: operation)
       }
       throw GitSyncError.failed(message)
+    }
+  }
+
+  /// Throws `.failed` when a rebase or merge is already underway in the worktree
+  /// (or when that can't be determined: unknown fails closed). Resolves each
+  /// marker through `rev-parse --git-path` so linked worktrees' private git dirs
+  /// are honoured.
+  nonisolated private func ensureNoSyncInProgress(worktreeURL: URL) async throws {
+    let path = worktreeURL.path(percentEncoded: false)
+    for marker in ["rebase-merge", "rebase-apply", "MERGE_HEAD"] {
+      let output: String
+      do {
+        output = try await runGit(
+          operation: .syncInProgressProbe, arguments: ["-C", path, "rev-parse", "--git-path", marker])
+      } catch {
+        throw GitSyncError.failed("Couldn't check for a rebase or merge in progress. Try again.")
+      }
+      let resolved = output.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !resolved.isEmpty else { continue }
+      // `--git-path` is relative to the `-C` directory unless git printed an absolute path.
+      let url = URL(fileURLWithPath: resolved, relativeTo: worktreeURL)
+      if FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
+        throw GitSyncError.failed("A rebase or merge is already in progress in this worktree.")
+      }
     }
   }
 

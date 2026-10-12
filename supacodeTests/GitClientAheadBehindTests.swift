@@ -104,6 +104,55 @@ struct GitClientAheadBehindTests {
     } catch {
       Issue.record("unexpected error \(error)")
     }
+    let calls = await store.calls
+    #expect(calls.contains { $0.contains("rebase") && $0.contains("--abort") })
+  }
+
+  @Test func rebaseInProgressThrowsFailedWithoutRebasingOrAborting() async throws {
+    let gitDir = FileManager.default.temporaryDirectory
+      .appending(path: "sync-in-progress-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let marker = gitDir.appending(path: "rebase-merge", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: marker, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: gitDir) }
+    let markerPath = marker.path(percentEncoded: false)
+
+    let store = AheadBehindShellCallStore()
+    let client = client(store: store) { args in
+      if args.contains("rev-parse"), args.last == "rebase-merge" {
+        return ShellOutput(stdout: markerPath + "\n", stderr: "", exitCode: 0)
+      }
+      return ShellOutput(stdout: "", stderr: "", exitCode: 0)
+    }
+    await #expect(throws: GitSyncError.failed("A rebase or merge is already in progress in this worktree.")) {
+      try await client.rebase(at: URL(fileURLWithPath: "/tmp/wt"), onto: "origin/main")
+    }
+    let calls = await store.calls
+    #expect(!calls.contains { $0.contains("rebase") && !$0.contains("rev-parse") })
+    #expect(!calls.contains { $0.contains("--abort") })
+  }
+
+  @Test func mergeInProgressThrowsFailedWithoutMergingOrAborting() async throws {
+    let gitDir = FileManager.default.temporaryDirectory
+      .appending(path: "sync-in-progress-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: gitDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: gitDir) }
+    let mergeHead = gitDir.appending(path: "MERGE_HEAD")
+    try Data("abc\n".utf8).write(to: mergeHead)
+    let mergeHeadPath = mergeHead.path(percentEncoded: false)
+
+    let store = AheadBehindShellCallStore()
+    let client = client(store: store) { args in
+      if args.contains("rev-parse"), args.last == "MERGE_HEAD" {
+        return ShellOutput(stdout: mergeHeadPath + "\n", stderr: "", exitCode: 0)
+      }
+      return ShellOutput(stdout: "", stderr: "", exitCode: 0)
+    }
+    await #expect(throws: GitSyncError.failed("A rebase or merge is already in progress in this worktree.")) {
+      try await client.mergeBase(at: URL(fileURLWithPath: "/tmp/wt"), base: "origin/main")
+    }
+    let calls = await store.calls
+    #expect(!calls.contains { $0.contains("merge") })
+    #expect(!calls.contains { $0.contains("--abort") })
   }
 
   @Test func rebaseSuccessDoesNotAbort() async throws {
