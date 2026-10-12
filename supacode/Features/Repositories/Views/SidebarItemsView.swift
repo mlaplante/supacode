@@ -652,6 +652,20 @@ private struct SidebarItemContextMenu: View {
         }
         .help("Rename the local branch for this worktree")
       }
+      if !rowIsFolder, !row.isMissing, row.isAttached, let base = row.syncBaseRef {
+        let canSync = row.canSync
+        let unavailableHelp = "Available when the branch is behind, the tree is clean, and no agent is working"
+        Button("Rebase onto \(base)", systemImage: "arrow.triangle.branch") {
+          store.send(.syncWorktreeWithBase(worktreeID: rowID, operation: .rebase))
+        }
+        .help(canSync ? "Rebase this branch onto \(base)" : unavailableHelp)
+        .disabled(!canSync)
+        Button("Merge \(base) into Branch", systemImage: "arrow.triangle.merge") {
+          store.send(.syncWorktreeWithBase(worktreeID: rowID, operation: .merge))
+        }
+        .help(canSync ? "Merge \(base) into this branch" : unavailableHelp)
+        .disabled(!canSync)
+      }
       Divider()
       if rowIsFolder {
         // Folder rows render through SidebarItemRow, which reads customization from the per-row

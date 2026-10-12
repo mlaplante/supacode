@@ -606,9 +606,9 @@ struct AgentPresenceFeatureTests {
     // Sorted by rawValue: claude, claude, codex. None awaiting.
     #expect(
       combined == [
-        .init(agent: .claude, activity: .idle),
-        .init(agent: .claude, activity: .idle),
-        .init(agent: .codex, activity: .idle),
+        .init(agent: .claude, activity: .idle, since: Date(timeIntervalSince1970: 0)),
+        .init(agent: .claude, activity: .idle, since: Date(timeIntervalSince1970: 0)),
+        .init(agent: .codex, activity: .idle, since: Date(timeIntervalSince1970: 0)),
       ]
     )
   }
@@ -630,9 +630,9 @@ struct AgentPresenceFeatureTests {
     let combined = harness.state.agents(across: [surfaceA, surfaceB], badgesEnabled: true)
     #expect(
       combined == [
-        .init(agent: .claude, activity: .awaitingInput),
-        .init(agent: .claude, activity: .idle),
-        .init(agent: .codex, activity: .idle),
+        .init(agent: .claude, activity: .awaitingInput, since: Date(timeIntervalSince1970: 0)),
+        .init(agent: .claude, activity: .idle, since: Date(timeIntervalSince1970: 0)),
+        .init(agent: .codex, activity: .idle, since: Date(timeIntervalSince1970: 0)),
       ]
     )
   }
@@ -1015,10 +1015,18 @@ struct AgentPresenceFeatureTests {
   /// effect from `.start` is not exercised here; tests call `livenessSweep()`.
   private struct Harness {
     var state = AgentPresenceFeature.State()
+    var now: Date
     private let reducer = AgentPresenceFeature()
 
+    init(now: Date = Date(timeIntervalSince1970: 0)) { self.now = now }
+
     @MainActor mutating func send(_ action: AgentPresenceFeature.Action) {
-      _ = reducer.reduce(into: &state, action: action)
+      let now = self.now
+      withDependencies {
+        $0.date = .constant(now)
+      } operation: {
+        _ = reducer.reduce(into: &state, action: action)
+      }
     }
 
     @MainActor mutating func livenessSweep() {
@@ -1037,11 +1045,149 @@ struct AgentPresenceFeatureTests {
       let checked = staged.compactMapValues { stage -> AgentPresenceFeature.RestoredRecord? in
         let alive = stage.pids.filter { AgentPresenceFeature.isAlive($0) }
         guard !alive.isEmpty else { return nil }
-        return AgentPresenceFeature.RestoredRecord(alivePids: alive, activity: stage.activity)
+        return AgentPresenceFeature.RestoredRecord(
+          alivePids: alive, activity: stage.activity, activitySince: stage.activitySince ?? now)
       }
       guard !checked.isEmpty else { return }
       send(.restoreFromSnapshotChecked(records: checked))
     }
+  }
+
+  // MARK: - Activity timestamps.
+
+  @Test func activityChangeStampsSince() {
+    let startDate = Date(timeIntervalSince1970: 1_000)
+    let laterDate = Date(timeIntervalSince1970: 1_060)
+    var harness = Harness(now: startDate)
+    let surfaceID = UUID()
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: surfaceID, pid: getpid())))
+    harness.now = laterDate
+    harness.send(.hookEventReceived(makeEvent(.awaitingInput, agent: .claude, surfaceID: surfaceID, pid: getpid())))
+    let key = AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
+    #expect(harness.state.records[key]?.activitySince == laterDate)
+  }
+
+  @Test func unchangedActivityDoesNotRestamp() {
+    let startDate = Date(timeIntervalSince1970: 1_000)
+    var harness = Harness(now: startDate)
+    let surfaceID = UUID()
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: surfaceID, pid: getpid())))
+    harness.send(.hookEventReceived(makeEvent(.busy, agent: .claude, surfaceID: surfaceID, pid: getpid())))
+    harness.now = Date(timeIntervalSince1970: 2_000)
+    harness.send(.hookEventReceived(makeEvent(.busy, agent: .claude, surfaceID: surfaceID, pid: getpid())))
+    let key = AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
+    #expect(harness.state.records[key]?.activitySince == startDate)
+  }
+
+  @Test func clearAttentionRestamps() {
+    let startDate = Date(timeIntervalSince1970: 1_000)
+    let laterDate = Date(timeIntervalSince1970: 1_500)
+    var harness = Harness(now: startDate)
+    let surfaceID = UUID()
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: surfaceID, pid: getpid())))
+    harness.send(.hookEventReceived(makeEvent(.awaitingInput, agent: .claude, surfaceID: surfaceID, pid: getpid())))
+    harness.now = laterDate
+    harness.send(.clearAttention(surfaces: [surfaceID]))
+    let key = AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
+    #expect(harness.state.records[key]?.activity == .idle)
+    #expect(harness.state.records[key]?.activitySince == laterDate)
+  }
+
+  @Test func rowSnapshotSinceIsEarliestAttentionDate() {
+    var harness = Harness(now: Date(timeIntervalSince1970: 100))
+    let surfaceA = UUID()
+    let surfaceB = UUID()
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: surfaceA, pid: getpid())))
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .codex, surfaceID: surfaceB, pid: getpid())))
+    harness.now = Date(timeIntervalSince1970: 200)
+    harness.send(.hookEventReceived(makeEvent(.busy, agent: .claude, surfaceID: surfaceA, pid: getpid())))
+    harness.now = Date(timeIntervalSince1970: 300)
+    harness.send(.hookEventReceived(makeEvent(.awaitingInput, agent: .codex, surfaceID: surfaceB, pid: getpid())))
+    harness.now = Date(timeIntervalSince1970: 400)
+    harness.send(.hookEventReceived(makeEvent(.awaitingInput, agent: .claude, surfaceID: surfaceA, pid: getpid())))
+    let snapshot = harness.state.rowSnapshot(across: [surfaceA, surfaceB], badgesEnabled: true)
+    // Both awaiting; the earliest attention stamp wins (codex at 300).
+    #expect(snapshot.since == Date(timeIntervalSince1970: 300))
+  }
+
+  @Test func rowSnapshotSinceFallsBackToWorkingDate() {
+    var harness = Harness(now: Date(timeIntervalSince1970: 100))
+    let surfaceA = UUID()
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: surfaceA, pid: getpid())))
+    harness.now = Date(timeIntervalSince1970: 200)
+    harness.send(.hookEventReceived(makeEvent(.busy, agent: .claude, surfaceID: surfaceA, pid: getpid())))
+    #expect(
+      harness.state.rowSnapshot(across: [surfaceA], badgesEnabled: true).since == Date(timeIntervalSince1970: 200))
+  }
+
+  @Test func rowSnapshotReportsAttentionAndSinceWithBadgesOff() {
+    var harness = Harness(now: Date(timeIntervalSince1970: 100))
+    let surface = UUID()
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: surface, pid: getpid())))
+    harness.now = Date(timeIntervalSince1970: 250)
+    harness.send(.hookEventReceived(makeEvent(.awaitingInput, agent: .claude, surfaceID: surface, pid: getpid())))
+    let snapshot = harness.state.rowSnapshot(across: [surface], badgesEnabled: false)
+    #expect(snapshot.agents.isEmpty)
+    #expect(snapshot.hasAttention)
+    #expect(snapshot.since == Date(timeIntervalSince1970: 250))
+  }
+
+  @Test func rowSnapshotWithoutAttentionReportsNone() {
+    var harness = Harness(now: Date(timeIntervalSince1970: 100))
+    let surface = UUID()
+    harness.send(.hookEventReceived(makeEvent(.busy, agent: .claude, surfaceID: surface, pid: getpid())))
+    #expect(!harness.state.rowSnapshot(across: [surface], badgesEnabled: true).hasAttention)
+  }
+
+  @Test func restoreCarriesActivitySince() {
+    let stamped = Date(timeIntervalSince1970: 500)
+    var harness = Harness(now: Date(timeIntervalSince1970: 900))
+    let surfaceID = UUID()
+    harness.restoreFromLayouts([
+      makeLayout(surfaces: [
+        (
+          id: surfaceID,
+          agents: [
+            .init(agent: "claude", pids: [getpid()], activity: "awaitingInput", activitySince: stamped)
+          ]
+        )
+      ])
+    ])
+    let key = AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
+    #expect(harness.state.records[key]?.activitySince == stamped)
+  }
+
+  @Test func restoreWithoutActivitySinceFallsBackToNow() {
+    let now = Date(timeIntervalSince1970: 900)
+    var harness = Harness(now: now)
+    let surfaceID = UUID()
+    harness.restoreFromLayouts([
+      makeLayout(surfaces: [
+        (
+          id: surfaceID,
+          agents: [
+            .init(agent: "claude", pids: [getpid()], activity: "busy", activitySince: nil)
+          ]
+        )
+      ])
+    ])
+    let key = AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
+    #expect(harness.state.records[key]?.activitySince == now)
+  }
+
+  @Test func legacySurfaceAgentRecordDecodesWithoutActivitySince() throws {
+    let json = #"{"agent":"claude","pids":[42],"activity":"busy"}"#
+    let record = try JSONDecoder().decode(TerminalLayoutSnapshot.SurfaceAgentRecord.self, from: Data(json.utf8))
+    #expect(record.activitySince == nil)
+  }
+
+  @Test func agentsBySurfaceRoundTripsActivitySince() {
+    let stamp = Date(timeIntervalSince1970: 777)
+    var harness = Harness(now: stamp)
+    let surfaceA = UUID()
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: surfaceA, pid: getpid())))
+    let records = harness.state.agentsBySurface()[surfaceA]
+    #expect(records?.first?.activitySince == stamp)
   }
 
   // MARK: - Layout helpers for restore tests.
@@ -1074,7 +1220,8 @@ struct AgentPresenceFeatureTests {
     pids: [Int32],
     activity: String = "idle"
   ) -> TerminalLayoutSnapshot.SurfaceAgentRecord {
-    TerminalLayoutSnapshot.SurfaceAgentRecord(agent: agent.rawValue, pids: pids, activity: activity)
+    TerminalLayoutSnapshot.SurfaceAgentRecord(
+      agent: agent.rawValue, pids: pids, activity: activity, activitySince: nil)
   }
 
   private func makeEvent(

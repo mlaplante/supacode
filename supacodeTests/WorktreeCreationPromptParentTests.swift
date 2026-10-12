@@ -461,11 +461,14 @@ struct WorktreeCreationPromptParentTests {
           worktree: createdWorktreeID,
           in: self.repoID,
           bucket: .unpinned,
-          item: SidebarState.Item(title: "Fresh", color: .red),
+          // The reload stamps `lastFocusedAt` with the wall clock; assert it is set, not its value.
+          item: SidebarState.Item(
+            title: "Fresh", color: .red, lastFocusedAt: store.state.sidebar.lastFocusedAt(for: createdWorktreeID)),
           position: nil,
         )
       }
     }
+    #expect(store.state.sidebar.lastFocusedAt(for: createdWorktreeID) != nil)
   }
 
   @Test func reloadMatchesPendingRowsToDiscoveredWorktreesByName() async {
@@ -535,11 +538,13 @@ struct WorktreeCreationPromptParentTests {
           worktree: bWorktreeID,
           in: self.repoID,
           bucket: .unpinned,
-          item: SidebarState.Item(title: "Title B", color: .blue),
+          item: SidebarState.Item(
+            title: "Title B", color: .blue, lastFocusedAt: store.state.sidebar.lastFocusedAt(for: bWorktreeID)),
           position: nil,
         )
       }
     }
+    #expect(store.state.sidebar.lastFocusedAt(for: bWorktreeID) != nil)
   }
 
   @Test func successAppliesCustomizationFromPendingRowToSidebar() async {

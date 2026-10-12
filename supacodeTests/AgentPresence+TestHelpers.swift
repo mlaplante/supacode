@@ -45,6 +45,7 @@ enum ManagedHookCommandVariables {
 @MainActor
 final class PresenceTestHarness {
   var state = AgentPresenceFeature.State()
+  var now = Date(timeIntervalSince1970: 0)
   private let reducer = AgentPresenceFeature()
   private var stream: AsyncStream<TerminalClient.Event>?
   private var consumeTask: Task<Void, Never>?
@@ -60,7 +61,10 @@ final class PresenceTestHarness {
   }
 
   private func reduce(_ action: AgentPresenceFeature.Action) {
-    _ = reducer.reduce(into: &state, action: action)
+    let now = self.now
+    withDependencies { $0.date = .constant(now) } operation: {
+      _ = reducer.reduce(into: &state, action: action)
+    }
   }
 
   /// Inlines the off-main liveness check so tests can settle the sweep in one tick.

@@ -104,6 +104,9 @@ nonisolated struct GitStatusSnapshot: Equatable, Sendable {
 
   static let empty = GitStatusSnapshot()
 
+  /// No tracked or untracked change (ignored paths don't count).
+  var isClean: Bool { !statuses.values.contains { $0.hasVisibleChange } }
+
   /// `changedAncestors` is always derived here, never passed in, so the rollup
   /// index can't drift from `statuses`.
   init(statuses: [String: GitFileStatus] = [:], ignoredPrefixes: Set<String> = []) {

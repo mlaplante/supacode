@@ -282,6 +282,15 @@ struct SettingsFilePersistenceTests {
     #expect(decoded.ghosttyUserConfigMode == .mergeAfterDefault)
   }
 
+  @Test func staleWorktreeAfterDaysDefaultsToSevenWhenKeyMissing() throws {
+    let data = try JSONEncoder().encode(GlobalSettings.default)
+    var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    object.removeValue(forKey: "staleWorktreeAfterDays")
+    let stripped = try JSONSerialization.data(withJSONObject: object)
+    let decoded = try JSONDecoder().decode(GlobalSettings.self, from: stripped)
+    #expect(decoded.staleWorktreeAfterDays == 7)
+  }
+
   @Test func globalToggleVisibilityHotkeyPersistsThroughRoundTrip() throws {
     var settings = GlobalSettings.default
     settings.globalToggleVisibilityHotkey = AppShortcutOverride(keyCode: 49, modifiers: [.command, .shift])

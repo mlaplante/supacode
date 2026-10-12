@@ -91,6 +91,8 @@ enum SidebarHighlightOrdering {
     let branchName: String
     let isNotified: Bool
     let classification: SidebarActiveClassification?
+    /// When the row's agent started waiting on the user; nil when nothing is parked.
+    let attentionSince: Date?
   }
 
   static func orderedRowIDs(
@@ -102,6 +104,14 @@ enum SidebarHighlightOrdering {
     return
       included
       .sorted { lhs, rhs in
+        // Rows parked on the user lead, longest wait first; then notified rows (when
+        // prioritized); then alphabetical.
+        switch (lhs.attentionSince, rhs.attentionSince) {
+        case (let left?, let right?) where left != right: return left < right
+        case (.some, .none): return true
+        case (.none, .some): return false
+        default: break
+        }
         if prioritizeNotified, lhs.isNotified != rhs.isNotified {
           return lhs.isNotified
         }
@@ -152,6 +162,8 @@ struct SidebarItemGroup: Identifiable, Equatable, Sendable {
   /// observation-track every row at the group and re-render the whole bucket
   /// on any one row's tick.
   var nestedRows: [SidebarBranchNesting.Row] = []
+  /// False when the section's worktree sort overlays the persisted drag order.
+  var sortAllowsReordering: Bool = true
 
   var id: Slot { slot }
 
@@ -163,7 +175,7 @@ struct SidebarItemGroup: Identifiable, Equatable, Sendable {
     switch slot {
     case .main, .pending: .disabled
     case .pinnedTail: .pinned(repositoryID)
-    case .unpinnedTail: .unpinned(repositoryID)
+    case .unpinnedTail: sortAllowsReordering ? .unpinned(repositoryID) : .disabled
     }
   }
 
@@ -436,6 +448,13 @@ extension SidebarItemFeature.Action {
     // row's resolved pull-request glyph into that cache.
     case .pullRequestChanged, .pullRequestDetailApplied:
       return [.selectedWorktreeSlice, .toolbarNotificationGroups]
+    // The accessory and the context menu (`SidebarContextRow(store.state)`) both
+    // read the leaf store directly, so no cache holds these fields.
+    case .aheadBehindChanged, .syncStateChanged:
+      return []
+    // The stale indicator is a row accessory read from the leaf store; no cache holds it.
+    case .staleReasonChanged, .treeCleanChanged:
+      return []
     case .diffStatsChanged, .pullRequestQueryStarted,
       .dragSessionChanged,
       .focusTerminalRequested, .focusTerminalConsumed:
@@ -507,6 +526,14 @@ extension RepositoriesFeature.Action {
     case .resolveOpenActions, .openActionsResolved:
       return []
 
+    // Stamps `lastFocusedAt` only; nothing a cached sidebar projection reads.
+    case .worktreeTouched:
+      return []
+
+    // A stamp changed a `.recentActivity` section's order.
+    case .worktreeTouchReordered:
+      return .sidebarStructure
+
     // The flush applies the parked bits itself inside the post-reduce hook.
     case .flushCoalescedCacheRecomputes:
       return []
@@ -523,6 +550,15 @@ extension RepositoriesFeature.Action {
     // and never mutates `state`. The downstream `.worktreeBranchNameLoaded` /
     // `.repositoryPullRequestsLoaded` arms declare their own invalidations.
     case .worktreeInfoEvent:
+      return []
+
+    // Launchers and results route into the row leaf via `.sidebarItems`, whose
+    // inner actions declare their own invalidations. `syncWorktreeFinished`
+    // only raises an alert (an `@Presents` field outside every cache).
+    // Stale classification only dispatches row actions (which declare their own).
+    case .refreshAheadBehind, .worktreeAheadBehindLoaded,
+      .worktreeTreeCleanLoaded, .reclassifyStale, .reclassifyAllStale,
+      .syncWorktreeWithBase, .syncWorktreeFinished:
       return []
 
     // Pure effect launcher: spawns the async SSH resolution, mutates no state.
@@ -575,7 +611,7 @@ extension RepositoriesFeature.Action {
       return []
 
     // Selection changes refresh both selection-derived caches.
-    case .selectionChanged, .selectWorktree, .selectArchivedWorktrees,
+    case .selectionChanged, .selectWorktree, .selectArchivedWorktrees, .selectStaleWorktrees,
       .selectNextWorktree, .selectPreviousWorktree, .selectWorktreeAtHotkeySlot,
       .worktreeHistoryBack, .worktreeHistoryForward,
       .setSidebarSelectedWorktreeIDs:
@@ -585,6 +621,10 @@ extension RepositoriesFeature.Action {
     // into the sidebar layout's highlight tag and the notification group name.
     case .repositoryCustomization(.presented(.delegate(.save))):
       return .allSidebar
+    // The sort re-orders the unpinned tail in the structure; the selection
+    // slices read the bucket order, not the displayed one.
+    case .setWorktreeSort:
+      return .sidebarStructure
     case .repositoryCustomization:
       return []
 
@@ -805,6 +845,29 @@ extension RepositoriesFeature.State {
   /// grouping preference. Carries their union for the menu's Unread dedupe.
   func menuBarForcedHoists() -> HighlightHoists {
     computeHighlightHoists(groupPinned: true, groupActive: true)
+  }
+
+  /// Rows with an agent parked on the user, longest wait first. Archived,
+  /// missing and terminating rows are excluded. Feeds the menu bar's Needs You
+  /// section and `jumpToNextAwaiting`.
+  func needsYouRowIDs() -> [Worktree.ID] {
+    needsYouRows()
+      .sorted { lhs, rhs in
+        if lhs.attentionSince != rhs.attentionSince { return lhs.attentionSince < rhs.attentionSince }
+        return SidebarHighlightOrdering.branchNameOrdersBefore(
+          lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
+      }
+      .map(\.id)
+  }
+
+  /// Count-only twin of `needsYouRowIDs()` for hot paths: filters, never sorts.
+  var needsYouCount: Int { needsYouRows().count }
+
+  private func needsYouRows() -> [SidebarItemFeature.State] {
+    let archived = archivedWorktreeIDSet
+    return sidebarItems.filter { row in
+      row.needsAttention && !row.isMissing && !row.lifecycle.isTerminating && !archived.contains(row.id)
+    }
   }
 
   /// Hoisted-row payload for one highlight-hoist pass (the sidebar structure
@@ -1116,7 +1179,8 @@ extension RepositoriesFeature.State {
           id: id,
           branchName: state.branchName,
           isNotified: state.hasUnseenNotifications,
-          classification: SidebarActiveClassification.classify(state)
+          classification: SidebarActiveClassification.classify(state),
+          attentionSince: state.needsAttention ? state.attentionSince : nil
         )
       )
     }
@@ -1206,6 +1270,11 @@ extension SidebarItemGroup {
       unpinnedTail = sortedByBranchName(unpinnedTail, in: state)
     }
 
+    // Overlay on the unpinned tail only; the pinned tail stays in manual order.
+    let sort = state.sidebar.sections[repositoryID]?.worktreeSort ?? .manual
+    unpinnedTail = sortedUnpinnedTail(unpinnedTail, repositoryID: repositoryID, nest: nestWorktreesByBranch, in: state)
+    let unpinnedRanks = sortRanks(unpinnedTail, sort: sort)
+
     let isSoleDefaultWorktree =
       mainID != nil && pinnedTail.isEmpty && pendingTail.isEmpty && unpinnedTail.isEmpty
 
@@ -1235,9 +1304,52 @@ extension SidebarItemGroup {
         repositoryID: repositoryID,
         rowIDs: unpinnedTail,
         nestedRows: nestedRows(
-          unpinnedTail, bucket: .unpinned, in: state, repositoryID: repositoryID, nest: nestWorktreesByBranch)
+          unpinnedTail, bucket: .unpinned, in: state, repositoryID: repositoryID, nest: nestWorktreesByBranch,
+          siblingRanks: unpinnedRanks),
+        sortAllowsReordering: sort.allowsReordering
       ),
     ]
+  }
+
+  /// The section's worktree sort applied to its unpinned tail. The one source
+  /// of that order: `computeSlots` (render) and `orderedSidebarItemIDs`
+  /// (hotkeys / arrow nav) both call it, so they cannot drift. With nesting on
+  /// the input is branch-sorted first so ties resolve the same in both callers.
+  static func sortedUnpinnedTail(
+    _ ids: [SidebarItemID],
+    repositoryID: Repository.ID,
+    nest: Bool,
+    in state: RepositoriesFeature.State
+  ) -> [SidebarItemID] {
+    let sort = state.sidebar.sections[repositoryID]?.worktreeSort ?? .manual
+    guard sort != .manual else { return ids }
+    let base = nest ? sortedByBranchName(ids, in: state) : ids
+    return sort.ordered(base) { id in
+      let row = state.sidebarItems[id: id]
+      return .init(
+        lastFocusedAt: state.sidebar.lastFocusedAt(for: id),
+        rank: agentRank(row),
+        since: row?.agentSnapshot.since,
+        branchName: row?.branchName ?? id.rawValue)
+    }
+  }
+
+  /// Position of each already-sorted id, handed to branch nesting so siblings
+  /// at every level follow the sort. Nil in manual mode (nesting keeps its
+  /// alphabetical order).
+  static func sortRanks(_ sortedIDs: [SidebarItemID], sort: SidebarWorktreeSort) -> [SidebarItemID: Int]? {
+    guard sort != .manual else { return nil }
+    return Dictionary(
+      sortedIDs.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { first, _ in first })
+  }
+
+  static func agentRank(_ row: SidebarItemFeature.State?) -> Int {
+    guard let row else { return 4 }
+    if row.hasAgentError { return 0 }
+    if row.hasAgentAwaitingInput || row.needsAttention { return 1 }
+    if row.hasAgentActivity { return 2 }
+    if !row.agents.isEmpty { return 3 }
+    return 4
   }
 
   private static func leafRows(_ ids: [SidebarItemID]) -> [SidebarBranchNesting.Row] {
@@ -1252,7 +1364,8 @@ extension SidebarItemGroup {
     bucket: SidebarBucket,
     in state: RepositoriesFeature.State,
     repositoryID: Repository.ID,
-    nest: Bool
+    nest: Bool,
+    siblingRanks: [SidebarItemID: Int]? = nil
   ) -> [SidebarBranchNesting.Row] {
     guard nest, !ids.isEmpty else { return leafRows(ids) }
     let collapsedPrefixes = state.sidebar.sections[repositoryID]?.buckets[bucket]?.collapsedBranchPrefixes ?? []
@@ -1266,7 +1379,8 @@ extension SidebarItemGroup {
     return SidebarBranchNesting.buildRows(
       itemIDs: ids,
       branchNames: branchNames,
-      collapsedPrefixes: collapsedPrefixes
+      collapsedPrefixes: collapsedPrefixes,
+      siblingRanks: siblingRanks
     )
   }
 

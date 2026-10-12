@@ -30,7 +30,7 @@ struct AgentAvatarGroupView: View {
   /// every supported agent) where no presence/activity is involved.
   init(agents: [SkillAgent], size: CGFloat = 14, maxVisible: Int = 3) {
     self.init(
-      instances: agents.map { .init(agent: $0, activity: .idle) },
+      instances: agents.map { .init(agent: $0, activity: .idle, since: .distantPast) },
       size: size,
       maxVisible: maxVisible
     )
@@ -51,6 +51,7 @@ struct AgentAvatarGroupView: View {
         agent: instance.agent,
         occurrence: occurrence,
         activity: instance.activity,
+        since: instance.since,
         // Leftmost on top — stable regardless of `maxVisible`.
         zIndex: Double(total - index)
       )
@@ -61,6 +62,7 @@ struct AgentAvatarGroupView: View {
     let agent: SkillAgent
     let occurrence: Int
     let activity: AgentPresenceFeature.Activity
+    let since: Date
     let zIndex: Double
     var id: AnyHashable { [AnyHashable(agent), AnyHashable(occurrence)] }
   }
@@ -70,7 +72,7 @@ struct AgentAvatarGroupView: View {
       HStack(spacing: 4) {
         HStack(spacing: -size * 0.35) {
           ForEach(visibleSlots) { slot in
-            AgentBadgeView(agent: slot.agent, size: size, activity: slot.activity)
+            AgentBadgeView(agent: slot.agent, size: size, activity: slot.activity, since: slot.since)
               .zIndex(slot.zIndex)
           }
         }

@@ -57,6 +57,7 @@ private struct WorktreeMainMenu: Commands {
     let run = AppShortcuts.runScript.effective(from: overrides)
     let stop = AppShortcuts.stopRunScript.effective(from: overrides)
     let jumpToLatestUnread = AppShortcuts.jumpToLatestUnread.effective(from: overrides)
+    let jumpToNextAwaiting = AppShortcuts.jumpToNextAwaiting.effective(from: overrides)
     CommandMenu("Worktrees") {
       Button("New Worktree…", systemImage: "plus") {
         store.send(.repositories(.createRandomWorktree))
@@ -101,6 +102,11 @@ private struct WorktreeMainMenu: Commands {
       .appKeyboardShortcut(archived)
       .help("Archived Worktrees (\(archived?.display ?? "none"))")
       .disabled(!snapshot.isInitialLoadComplete)
+      Button("Review Stale Worktrees", systemImage: "clock.badge.xmark") {
+        store.send(.repositories(.selectStaleWorktrees))
+      }
+      .help("Review worktrees with nothing on them or untouched for a while")
+      .disabled(!snapshot.isInitialLoadComplete)
       Divider()
       Button("Archive Worktree…", systemImage: "archivebox") {
         archiveWorktreeAction?()
@@ -133,6 +139,12 @@ private struct WorktreeMainMenu: Commands {
       .appKeyboardShortcut(jumpToLatestUnread)
       .help("Jump to Latest Unread Notification (\(jumpToLatestUnread?.display ?? "none"))")
       .disabled(snapshot.notificationIndicatorCount == 0)
+      Button("Jump to Next Awaiting Agent", systemImage: "person.crop.circle.badge.exclamationmark") {
+        store.send(.jumpToNextAwaiting)
+      }
+      .appKeyboardShortcut(jumpToNextAwaiting)
+      .help("Jump to the agent that has waited longest for input (\(jumpToNextAwaiting?.display ?? "none"))")
+      .disabled(snapshot.needsYouCount == 0)
       Divider()
       // Always-enabled; the reducer beeps when there's no worktree to move to.
       Button("Select Next", systemImage: "chevron.down") {

@@ -227,7 +227,8 @@ struct LayoutPersistenceTests {
     let paneID = PaneID()
     let tabID = TabID()
     let contentID = ContentID()
-    let record = TerminalLayoutSnapshot.SurfaceAgentRecord(agent: "claude", pids: [123], activity: "busy")
+    let record = TerminalLayoutSnapshot.SurfaceAgentRecord(
+      agent: "claude", pids: [123], activity: "busy", activitySince: nil)
     let result = LayoutPersistence.record(
       for: layout(paneID: paneID, tabID: tabID, contentID: contentID),
       runtime: ContentRuntime(),
@@ -247,7 +248,8 @@ struct LayoutPersistenceTests {
     let tabID = TabID()
     let contentID = ContentID()
     let runtime = ContentRuntime()
-    let record = TerminalLayoutSnapshot.SurfaceAgentRecord(agent: "claude", pids: [123], activity: "busy")
+    let record = TerminalLayoutSnapshot.SurfaceAgentRecord(
+      agent: "claude", pids: [123], activity: "busy", activitySince: nil)
     let live = StubContent(
       id: contentID,
       snapshotState: TerminalContentState(workingDirectory: "/live", agents: [record])
@@ -271,7 +273,8 @@ struct LayoutPersistenceTests {
     let paneID = PaneID()
     let tabID = TabID()
     let contentID = ContentID()
-    let record = TerminalLayoutSnapshot.SurfaceAgentRecord(agent: "claude", pids: [123], activity: "busy")
+    let record = TerminalLayoutSnapshot.SurfaceAgentRecord(
+      agent: "claude", pids: [123], activity: "busy", activitySince: nil)
     var stored = layout(paneID: paneID, tabID: tabID, contentID: contentID)
     stored.panes[id: paneID]?.tabs[id: tabID]?.content = ContentSnapshot(
       id: contentID,

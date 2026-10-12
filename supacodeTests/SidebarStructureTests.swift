@@ -326,6 +326,160 @@ struct SidebarStructureTests {
     #expect(unpinnedTail == [unpinB.id, unpinX.id])
   }
 
+  @Test func agentStateSortAppliesToUnpinnedTailOnlyAndDisablesMove() {
+    let repoRoot = URL(fileURLWithPath: "/tmp/repo")
+    let main = makeMainWorktree(repoRoot: repoRoot)
+    let pinned = makeWorktree(id: "/tmp/repo/pinned", name: "pinned", repoRoot: repoRoot)
+    let one = makeWorktree(id: "/tmp/repo/one", name: "one", repoRoot: repoRoot)
+    let two = makeWorktree(id: "/tmp/repo/two", name: "two", repoRoot: repoRoot)
+    let three = makeWorktree(id: "/tmp/repo/three", name: "three", repoRoot: repoRoot)
+    let repository = Repository(
+      id: RepositoryID(repoRoot.path(percentEncoded: false)),
+      rootURL: repoRoot,
+      name: "repo",
+      worktrees: IdentifiedArray(uniqueElements: [main, pinned, one, two, three])
+    )
+    var state = makeState(repositories: [repository])
+    state.$sidebar.withLock { sidebar in
+      var section = sidebar.sections[repository.id] ?? .init()
+      var pinnedBucket = section.buckets[.pinned] ?? .init()
+      pinnedBucket.items[pinned.id] = .init()
+      section.buckets[.pinned] = pinnedBucket
+      var unpinnedBucket = section.buckets[.unpinned] ?? .init()
+      unpinnedBucket.items.removeValue(forKey: pinned.id)
+      section.buckets[.unpinned] = unpinnedBucket
+      sidebar.sections[repository.id] = section
+    }
+    state.reconcileSidebarForTesting()
+    for id in [one.id, two.id, three.id] {
+      let name = state.sidebarItems[id: id]?.name ?? id.rawValue
+      state.sidebarItems[id: id]?.branchName = name
+    }
+    state.sidebarItems[id: three.id]?.agentSnapshot.agents = [
+      .init(agent: .claude, activity: .awaitingInput, since: .distantPast)
+    ]
+
+    func groups() -> [SidebarItemGroup] {
+      SidebarItemGroup.computeSlots(
+        in: state, repositoryID: repository.id, pendingIDs: [], hoistedRowIDs: [], nestWorktreesByBranch: false)
+    }
+    let manualUnpinned = groups().first { $0.slot == .unpinnedTail }
+    #expect(manualUnpinned?.moveBehavior == .unpinned(repository.id))
+    let manualOrder = manualUnpinned?.rowIDs ?? []
+    #expect(Set(manualOrder) == [one.id, two.id, three.id])
+
+    state.$sidebar.withLock { $0.sections[repository.id]?.worktreeSort = .agentState }
+    let sorted = groups()
+    let sortedUnpinned = sorted.first { $0.slot == .unpinnedTail }
+    #expect(sortedUnpinned?.rowIDs.first == three.id)
+    #expect(sortedUnpinned?.rowIDs.dropFirst().elementsEqual(manualOrder.filter { $0 != three.id }) == true)
+    #expect(sortedUnpinned?.moveBehavior == .disabled)
+    #expect(sorted.first { $0.slot == .pinnedTail }?.rowIDs == [pinned.id])
+    #expect(sorted.first { $0.slot == .pinnedTail }?.moveBehavior == .pinned(repository.id))
+  }
+
+  /// main + three unpinned rows ("one", "two", "three"), branch names set from names.
+  private struct SortFixture {
+    var state: RepositoriesFeature.State
+    let repoID: Repository.ID
+    let ids: [Worktree.ID]
+  }
+
+  private func makeSortFixture() -> SortFixture {
+    let repoRoot = URL(fileURLWithPath: "/tmp/repo")
+    let main = makeMainWorktree(repoRoot: repoRoot)
+    let one = makeWorktree(id: "/tmp/repo/one", name: "one", repoRoot: repoRoot)
+    let two = makeWorktree(id: "/tmp/repo/two", name: "two", repoRoot: repoRoot)
+    let three = makeWorktree(id: "/tmp/repo/three", name: "three", repoRoot: repoRoot)
+    let repository = Repository(
+      id: RepositoryID(repoRoot.path(percentEncoded: false)),
+      rootURL: repoRoot,
+      name: "repo",
+      worktrees: IdentifiedArray(uniqueElements: [main, one, two, three])
+    )
+    var state = makeState(repositories: [repository])
+    for id in [one.id, two.id, three.id] {
+      let name = state.sidebarItems[id: id]?.name ?? id.rawValue
+      state.sidebarItems[id: id]?.branchName = name
+    }
+    return SortFixture(state: state, repoID: repository.id, ids: [one.id, two.id, three.id])
+  }
+
+  @Test func orderedSidebarItemIDsFollowsAgentStateSort() {
+    let fixture = makeSortFixture()
+    var state = fixture.state
+    let repoID = fixture.repoID
+    let ids = fixture.ids
+    state.sidebarItems[id: ids[2]]?.agentSnapshot.agents = [
+      .init(agent: .claude, activity: .awaitingInput, since: .distantPast)
+    ]
+    let manual = state.orderedSidebarItemIDs(includingRepositoryIDs: [repoID])
+    state.$sidebar.withLock { $0.sections[repoID, default: .init()].worktreeSort = .agentState }
+    let sorted = state.orderedSidebarItemIDs(includingRepositoryIDs: [repoID])
+    #expect(sorted.first { ids.contains($0) } == ids[2])
+    #expect(sorted != manual)
+    let rendered = SidebarItemGroup.computeSlots(
+      in: state, repositoryID: repoID, pendingIDs: [], hoistedRowIDs: [], nestWorktreesByBranch: false)
+    let unpinned = rendered.first { $0.slot == .unpinnedTail }?.rowIDs ?? []
+    #expect(Array(sorted.suffix(unpinned.count)) == unpinned)
+  }
+
+  @Test func sortAppliesWithinBranchNesting() {
+    let fixture = makeSortFixture()
+    var state = fixture.state
+    let repoID = fixture.repoID
+    let ids = fixture.ids
+    state.sidebarItems[id: ids[2]]?.agentSnapshot.agents = [
+      .init(agent: .claude, activity: .awaitingInput, since: .distantPast)
+    ]
+    state.$sidebar.withLock { $0.sections[repoID, default: .init()].worktreeSort = .agentState }
+    let groups = SidebarItemGroup.computeSlots(
+      in: state, repositoryID: repoID, pendingIDs: [], hoistedRowIDs: [], nestWorktreesByBranch: true)
+    let rows = groups.first { $0.slot == .unpinnedTail }?.nestedRows ?? []
+    let leafIDs: [Worktree.ID] = rows.compactMap {
+      if case .leaf(let id, _, _) = $0 { return id }
+      return nil
+    }
+    #expect(leafIDs.first == ids[2])
+    #expect(leafIDs.count == 3)
+  }
+
+  @Test func recentActivitySortUsesLastFocusedAt() {
+    let fixture = makeSortFixture()
+    var state = fixture.state
+    let repoID = fixture.repoID
+    let ids = fixture.ids
+    state.reconcileSidebarForTesting()
+    state.$sidebar.withLock { sidebar in
+      sidebar.sections[repoID, default: .init()].worktreeSort = .recentActivity
+      for (id, stamp) in [(ids[0], 100.0), (ids[1], 900.0), (ids[2], 500.0)] {
+        sidebar.sections[repoID, default: .init()].buckets[.unpinned, default: .init()]
+          .items[id, default: .init()].lastFocusedAt = Date(timeIntervalSince1970: stamp)
+      }
+    }
+    let groups = SidebarItemGroup.computeSlots(
+      in: state, repositoryID: repoID, pendingIDs: [], hoistedRowIDs: [], nestWorktreesByBranch: false)
+    #expect(groups.first { $0.slot == .unpinnedTail }?.rowIDs == [ids[1], ids[2], ids[0]])
+  }
+
+  @Test func agentRankCoversAllFiveRanks() {
+    let fixture = makeSortFixture()
+    var state = fixture.state
+    let ids = fixture.ids
+    #expect(SidebarItemGroup.agentRank(nil) == 4)
+    #expect(SidebarItemGroup.agentRank(state.sidebarItems[id: ids[0]]) == 4)
+    state.sidebarItems[id: ids[0]]?.agentSnapshot.agents = [.init(agent: .claude, activity: .idle, since: .distantPast)]
+    #expect(SidebarItemGroup.agentRank(state.sidebarItems[id: ids[0]]) == 3)
+    state.sidebarItems[id: ids[0]]?.agentSnapshot.isWorking = true
+    #expect(SidebarItemGroup.agentRank(state.sidebarItems[id: ids[0]]) == 2)
+    state.sidebarItems[id: ids[0]]?.agentSnapshot.agents = [
+      .init(agent: .claude, activity: .awaitingInput, since: .distantPast)
+    ]
+    #expect(SidebarItemGroup.agentRank(state.sidebarItems[id: ids[0]]) == 1)
+    state.sidebarItems[id: ids[0]]?.agentSnapshot.hasError = true
+    #expect(SidebarItemGroup.agentRank(state.sidebarItems[id: ids[0]]) == 0)
+  }
+
   @Test func nestByBranchOffPreservesBucketOrder() {
     let repoRoot = URL(fileURLWithPath: "/tmp/repo")
     let main = makeMainWorktree(repoRoot: repoRoot)
@@ -473,7 +627,9 @@ struct SidebarStructureTests {
     // running) is the reverse of alphabetical, proving classification no longer
     // drives order.
     state.sidebarItems[id: charlie.id]?.agentSnapshot.hasError = true
-    state.sidebarItems[id: bravo.id]?.agentSnapshot.agents = [.init(agent: .claude, activity: .idle)]
+    state.sidebarItems[id: bravo.id]?.agentSnapshot.agents = [
+      .init(agent: .claude, activity: .idle, since: .distantPast)
+    ]
     state.sidebarItems[id: alpha.id]?.runningScripts.append(.init(id: UUID(), tint: .blue))
 
     let structure = state.computeSidebarStructure(groupPinned: false, groupActive: true)

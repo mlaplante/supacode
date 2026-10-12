@@ -328,6 +328,7 @@ struct AppFeature {
     case selectPreviousTerminalTab
     case splitTerminal(TerminalSplitMenuDirection)
     case jumpToLatestUnread
+    case jumpToNextAwaiting
     case menuBarWorktreeSelected(worktreeID: Worktree.ID)
     case markAllNotificationsRead
     case runScript
@@ -487,6 +488,7 @@ struct AppFeature {
             // card reflects external installs (e.g. `claude install`)
             // for users who keep the app open across days.
             .send(.settings(.refreshAgentIntegrationStates)),
+            .send(.settings(.refreshHookActivity)),
             // Resume background git polling only while foreground-active so an
             // idle / backgrounded app stays quiet.
             .run { _ in await worktreeInfoWatcher.send(.setActive(true)) },
@@ -538,7 +540,7 @@ struct AppFeature {
           // Selecting the archived list must NOT overwrite the last
           // focused live worktree — preserve `focusedWorktreeID` so
           // returning from archives restores the prior row.
-          if !state.repositories.isShowingArchivedWorktrees {
+          if !state.repositories.isShowingArchivedWorktrees, !state.repositories.isShowingStaleWorktrees {
             state.repositories.$sidebar.withLock { sidebar in
               sidebar.focusedWorktreeID = lastFocusedWorktreeID
             }
@@ -756,6 +758,17 @@ struct AppFeature {
           await terminalClient.send(.selectTab(worktree, tabID: tabId))
         }
 
+      case .settings(.delegate(.sendHookTestEvent(let agent))):
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
+          return .send(.settings(.hookTestEventFailed(agent, reason: "Select a worktree first.")))
+        }
+        let input = AgentHookActivityClient.testEventInput(for: agent)
+        return .run { _ in
+          await terminalClient.send(
+            .createTabWithInput(worktree, input: input, runSetupScriptIfNew: false, focusing: false)
+          )
+        }
+
       case .settings(.delegate(.settingsChanged(let settings))):
         let shouldCheckSystemNotificationPermission =
           settings.systemNotificationsEnabled && !state.lastKnownSystemNotificationsEnabled
@@ -796,6 +809,8 @@ struct AppFeature {
           .send(.repositories(.setGithubIntegrationEnabled(anyForgeIntegrationEnabled))),
           .merge(forgeTeardownEffects),
           .send(.repositories(.setMergedWorktreeAction(settings.mergedWorktreeAction))),
+          // The stale threshold feeds every row's classification.
+          .send(.repositories(.reclassifyAllStale)),
           .send(.repositories(.setMoveNotifiedWorktreeToTop(settings.moveNotifiedWorktreeToTop))),
           // The global default editor feeds every repo's resolved open action, and the
           // selected worktree's own open action resolves against it too.
@@ -1172,6 +1187,31 @@ struct AppFeature {
               .focusSurface(worktree, tabID: location.tabID, surfaceID: location.surfaceID)
             )
             await terminalClient.markNotificationRead(location.worktreeID, location.notificationID)
+          }
+        )
+
+      case .jumpToNextAwaiting:
+        guard let worktreeID = state.repositories.needsYouRowIDs().first,
+          let worktree = state.repositories.worktree(for: worktreeID),
+          let row = state.repositories.sidebarItems[id: worktreeID]
+        else {
+          jumpLogger.debug("jumpToNextAwaiting invoked with no awaiting agents.")
+          return .run { _ in NSSound.beep() }
+        }
+        // The surface whose agent waited longest. Presence is keyed per surface,
+        // so ask the presence state rather than the row snapshot.
+        let surfaceID = state.agentPresence.records
+          .filter { row.surfaceIDs.contains($0.key.surfaceID) && $0.value.activity.isAttention }
+          .min { $0.value.activitySince < $1.value.activitySince }?
+          .key.surfaceID
+        // Surfaces close between presence updates; a stale id degrades to a plain select.
+        let tabID = surfaceID.flatMap { terminalClient.tabID(worktreeID, $0) }
+        analyticsClient.capture("agents_jump_to_next_awaiting", nil)
+        return .merge(
+          .send(.repositories(.selectWorktree(worktreeID, focusTerminal: tabID == nil))),
+          .run { _ in
+            guard let surfaceID, let tabID else { return }
+            await terminalClient.send(.focusSurface(worktree, tabID: tabID, surfaceID: surfaceID))
           }
         )
 
@@ -1804,6 +1844,12 @@ struct AppFeature {
       case .commandPalette(.delegate(.viewArchivedWorktrees)):
         return .send(.repositories(.selectArchivedWorktrees))
 
+      case .commandPalette(.delegate(.viewStaleWorktrees)):
+        return .send(.repositories(.selectStaleWorktrees))
+
+      case .commandPalette(.delegate(.jumpToNextAwaiting)):
+        return .send(.jumpToNextAwaiting)
+
       case .commandPalette(.delegate(.refreshWorktrees)):
         return .send(.refreshWorktreesRequested)
 
@@ -2110,7 +2156,18 @@ struct AppFeature {
         return .merge(presenceEffect, ackEffect)
 
       case .terminalEvent(.agentHookEventReceived(let event)):
-        return .send(.agentPresence(.hookEventReceived(event)))
+        // Mirror for the settings module, which cannot see presence state.
+        if let agent = SkillAgent(rawValue: event.agent) {
+          AgentHookActivityClient.recordEvent(agent: agent, at: now)
+        }
+        var effects: [Effect<Action>] = [.send(.agentPresence(.hookEventReceived(event)))]
+        // Only busy / session-start count as use; keeps the persisted sidebar write rare.
+        if let name = AgentHookEvent.EventName(rawValue: event.event), name == .busy || name == .sessionStart,
+          let itemID = state.repositories.surfaceToItemID[event.surfaceID]
+        {
+          effects.append(.send(.repositories(.worktreeTouched(itemID))))
+        }
+        return .merge(effects)
 
       // The user is looking at this surface, so whatever was parked on them there
       // is acknowledged. Scoped to the focused surface, so a broken session in

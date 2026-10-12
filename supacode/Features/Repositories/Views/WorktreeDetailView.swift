@@ -224,6 +224,7 @@ struct WorktreeDetailView: View {
     selectedWorktreeSummaries: [MultiSelectedWorktreeSummary]
   ) -> Bool {
     !repositories.isShowingArchivedWorktrees
+      && !repositories.isShowingStaleWorktrees
       && selectedWorktreeSummaries.count > 1
   }
 
@@ -233,7 +234,7 @@ struct WorktreeDetailView: View {
     selectedWorktree: Worktree?,
     selectedWorktreeSummaries: [MultiSelectedWorktreeSummary]
   ) -> Bool {
-    if repositories.isShowingArchivedWorktrees {
+    if repositories.isShowingArchivedWorktrees || repositories.isShowingStaleWorktrees {
       return false
     }
     if shouldShowMultiSelectionSummary(
@@ -273,7 +274,11 @@ struct WorktreeDetailView: View {
     selectedWorktreeSummaries: [MultiSelectedWorktreeSummary]
   ) -> some View {
     Group {
-      if repositories.isShowingArchivedWorktrees {
+      if repositories.isShowingStaleWorktrees {
+        StaleWorktreesDetailView(
+          store: store.scope(state: \.repositories, action: \.repositories)
+        )
+      } else if repositories.isShowingArchivedWorktrees {
         ArchivedWorktreesDetailView(
           store: store.scope(state: \.repositories, action: \.repositories)
         )

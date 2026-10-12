@@ -1332,6 +1332,99 @@ struct SettingsFeatureAgentIntegrationTests {
 
     await store.send(.agentIntegrationChecked(.standard(.claude), .failure(unreadableProbeError)))
   }
+
+  @Test(.dependencies) func hookActivityLoadsIntoState() async {
+    let stamp = Date(timeIntervalSince1970: 123)
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.agentHookActivityClient.lastEventDates = { [.claude: stamp] }
+    }
+    store.exhaustivity = .off
+    await store.send(.refreshHookActivity)
+    await store.receive(\.hookActivityLoaded) { $0.lastHookEventAt = [.claude: stamp] }
+  }
+
+  @Test(.dependencies) func pollingRefreshesEveryFiveSeconds() async {
+    let clock = TestClock()
+    let calls = LockIsolated(0)
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.agentHookActivityClient.lastEventDates = {
+        calls.withValue { $0 += 1 }
+        return [:]
+      }
+    }
+    store.exhaustivity = .off
+    await store.send(.startHookActivityPolling)
+    await store.receive(\.hookActivityLoaded)
+    await clock.advance(by: .seconds(5))
+    await store.receive(\.hookActivityLoaded)
+    #expect(calls.value == 2)
+    await store.send(.stopHookActivityPolling)
+  }
+
+  @Test(.dependencies) func testEventSuccessStopsPollingWithoutFailure() async {
+    let clock = TestClock()
+    let tapped = Date(timeIntervalSince1970: 100)
+    let seen = LockIsolated<[SkillAgent: Date]>([:])
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.date.now = tapped
+      $0.agentHookActivityClient.lastEventDates = { seen.value }
+    }
+    store.exhaustivity = .off
+    await store.send(.agentSendTestEventTapped(.codex))
+    await store.receive(\.delegate.sendHookTestEvent)
+    seen.setValue([.codex: tapped.addingTimeInterval(1)])
+    await clock.advance(by: .seconds(2))
+    await store.receive(\.hookActivityLoaded) {
+      $0.lastHookEventAt = [.codex: tapped.addingTimeInterval(1)]
+    }
+    await clock.advance(by: .seconds(20))
+    #expect(store.state.hookTestFailures[.codex] == nil)
+  }
+
+  @Test(.dependencies) func testEventTimeoutSetsFailureAfterFifteenSeconds() async {
+    let clock = TestClock()
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.date.now = Date(timeIntervalSince1970: 100)
+    }
+    store.exhaustivity = .off
+    await store.send(.agentSendTestEventTapped(.codex))
+    await store.receive(\.delegate.sendHookTestEvent)
+    await clock.advance(by: .seconds(14))
+    #expect(store.state.hookTestFailures[.codex] == nil)
+    await clock.advance(by: .seconds(1))
+    await store.receive(\.hookTestEventFailed)
+    let message = store.state.hookTestFailures[.codex] ?? ""
+    #expect(message.hasPrefix("No event received; check that "))
+    #expect(message.contains(".codex"))
+  }
+
+  @Test(.dependencies) func hookTestEventFailureIsRecorded() async {
+    let store = TestStore(initialState: SettingsFeature.State()) { SettingsFeature() }
+    await store.send(.hookTestEventFailed(.claude, reason: "boom")) {
+      $0.hookTestFailures = [.claude: "boom"]
+    }
+  }
+
+  @Test func hookStatusLineVariants() {
+    let now = Date(timeIntervalSince1970: 1_000)
+    #expect(
+      AgentHookStatus.resolve(installed: .installed, lastEventAt: now.addingTimeInterval(-120), now: now)
+        == .healthy(lastEvent: "2m 0s"))
+    #expect(AgentHookStatus.resolve(installed: .installed, lastEventAt: nil, now: now) == .installedNoEvents)
+    #expect(AgentHookStatus.resolve(installed: .outdated, lastEventAt: nil, now: now) == .outdated)
+    #expect(AgentHookStatus.resolve(installed: .notInstalled, lastEventAt: nil, now: now) == .notInstalled)
+  }
 }
 
 /// Stands in for the reported incident: the settings file exists but the OS

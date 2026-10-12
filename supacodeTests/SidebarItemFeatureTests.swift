@@ -21,6 +21,51 @@ struct SidebarItemFeatureTests {
     await store.send(.diffStatsChanged(added: 3, removed: 1))
   }
 
+  @Test func aheadBehindChangeNormalizesZeroBehindAndNoOpsOnRepeat() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.aheadBehindChanged(ahead: 2, behind: 4, base: "origin/main")) {
+      $0.aheadCount = 2
+      $0.behindCount = 4
+      $0.syncBaseRef = "origin/main"
+      $0.hasProbedAheadBehind = true
+    }
+    await store.send(.aheadBehindChanged(ahead: 2, behind: 4, base: "origin/main"))
+    await store.send(.aheadBehindChanged(ahead: 2, behind: 0, base: "origin/main")) {
+      $0.behindCount = nil
+    }
+  }
+
+  @Test func staleReasonChangeIsEqualityGuarded() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.staleReasonChanged(.empty)) { $0.staleReason = .empty }
+    await store.send(.staleReasonChanged(.empty))
+    await store.send(.staleReasonChanged(.idle(days: 9))) { $0.staleReason = .idle(days: 9) }
+    await store.send(.staleReasonChanged(nil)) { $0.staleReason = nil }
+  }
+
+  @Test func treeCleanChangeIsEqualityGuarded() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.treeCleanChanged(true)) { $0.isTreeClean = true }
+    await store.send(.treeCleanChanged(true))
+    await store.send(.treeCleanChanged(false)) { $0.isTreeClean = false }
+    await store.send(.treeCleanChanged(nil)) { $0.isTreeClean = nil }
+  }
+
+  @Test func syncStateChangeIsEqualityGuarded() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.syncStateChanged(true)) { $0.isSyncing = true }
+    await store.send(.syncStateChanged(true))
+    await store.send(.syncStateChanged(false)) { $0.isSyncing = false }
+  }
+
   @Test func lifecycleEqualityGuardSkipsNoOps() async {
     var state = makeState(name: "feature")
     state.lifecycle = .archiving
@@ -69,7 +114,8 @@ struct SidebarItemFeatureTests {
     }
     let instance = AgentPresenceFeature.AgentInstance(
       agent: .claude,
-      activity: .busy
+      activity: .busy,
+      since: .distantPast
     )
     await store.send(.agentSnapshotChanged(.init(agents: [instance], isWorking: true))) {
       $0.agentSnapshot = .init(agents: [instance], isWorking: true)
@@ -86,14 +132,14 @@ struct SidebarItemFeatureTests {
     let store = TestStore(initialState: makeState(name: "feature")) {
       SidebarItemFeature()
     }
-    let errored = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .error)
+    let errored = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .error, since: .distantPast)
     await store.send(.agentSnapshotChanged(.init(agents: [errored], hasError: true))) {
       $0.agentSnapshot = .init(agents: [errored], hasError: true)
     }
     #expect(store.state.hasAgentError)
 
     // A restart clears it and puts the row back to work.
-    let busy = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let busy = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     await store.send(.agentSnapshotChanged(.init(agents: [busy], isWorking: true))) {
       $0.agentSnapshot = .init(agents: [busy], isWorking: true)
     }
@@ -193,7 +239,7 @@ struct SidebarItemFeatureTests {
     #expect(!store.state.isTaskRunning)
 
     // An agent starting work shimmers the row even while the script keeps running.
-    let busy = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let busy = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     await store.send(.agentSnapshotChanged(.init(agents: [busy], isWorking: true))) {
       $0.agentSnapshot = .init(agents: [busy], isWorking: true)
     }

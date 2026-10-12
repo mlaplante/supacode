@@ -8,6 +8,8 @@ import SupacodeSettingsShared
 /// for anything unread that neither one already shows. Only row IDs are cached;
 /// each row observes its own leaf, exactly like the sidebar.
 struct MenuBarSections: Equatable {
+  /// Rows with an agent parked on the user, longest wait first.
+  var needsYou: [Worktree.ID] = []
   var pinned: [Worktree.ID] = []
   var active: [Worktree.ID] = []
   var unread: [Worktree.ID] = []
@@ -20,11 +22,12 @@ struct MenuBarSections: Equatable {
   /// because the only unread row is also Active.
   var hasUnread = false
 
-  var isEmpty: Bool { pinned.isEmpty && active.isEmpty && unread.isEmpty }
+  var isEmpty: Bool { needsYou.isEmpty && pinned.isEmpty && active.isEmpty && unread.isEmpty }
 
   /// Headers and rows flattened into the order the menu renders them.
   var entries: [MenuBarEntry] {
     var entries: [MenuBarEntry] = []
+    appendSection(&entries, title: "Needs You", rowIDs: needsYou, dotColor: .active)
     appendSection(&entries, title: "Pinned", rowIDs: pinned, dotColor: .pinned)
     appendSection(&entries, title: "Active", rowIDs: active, dotColor: .active)
     appendSection(&entries, title: "Unread", rowIDs: unread, dotColor: nil)
@@ -67,20 +70,24 @@ extension RepositoriesFeature.State {
     // user turned sidebar grouping off.
     let hoists = menuBarForcedHoists()
     var sections = MenuBarSections()
-    sections.pinned = hoists.pinned
-    sections.active = hoists.active
+    let needsYou = needsYouRowIDs()
+    let needsYouSet = Set(needsYou)
+    sections.needsYou = needsYou
+    // A pinned row that needs you is listed once, under Needs You.
+    sections.pinned = hoists.pinned.filter { !needsYouSet.contains($0) }
+    sections.active = hoists.active.filter { !needsYouSet.contains($0) }
 
     let unread = unreadRowIDs()
     sections.hasUnread = !unread.isEmpty
     // The Pinned and Active sections already show their rows; listing them again
     // under Unread would double them up. Dedupe against the menu's own hoist set,
     // not the sidebar's, which is empty when grouping is off.
-    sections.unread = unread.filter { !hoists.hoistedSet.contains($0) }
+    sections.unread = unread.filter { !hoists.hoistedSet.contains($0) && !needsYouSet.contains($0) }
 
     // Build the subtitle tag for every repo contributing a row. Rebuilt here
     // rather than reused from `sidebarStructure` so the tags survive when the
     // sidebar's grouping projections are empty.
-    for rowID in hoists.pinned + hoists.active + sections.unread {
+    for rowID in needsYou + hoists.pinned + sections.active + sections.unread {
       guard let repositoryID = sidebarItems[id: rowID]?.repositoryID,
         sections.repositoryTagByID[repositoryID] == nil,
         let repository = repositories[id: repositoryID]

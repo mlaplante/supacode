@@ -50,7 +50,7 @@ struct MenuBarNotificationListTests {
     var state = RepositoriesFeature.State(
       reconciledRepositories: [makeRepository(worktrees: [working])]
     )
-    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     state.sidebarItems[id: working.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
     state.reconcileSidebarForTesting()
 
@@ -68,7 +68,7 @@ struct MenuBarNotificationListTests {
       reconciledRepositories: [makeRepository(worktrees: [hoisted])]
     )
     // Unread plus a tracked agent classifies as Active, so the row is hoisted.
-    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     state.sidebarItems[id: hoisted.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
     setRowNotifications(&state, id: hoisted.id, notifications: [makeNotification(isRead: false)])
     state.reconcileSidebarForTesting()
@@ -117,7 +117,7 @@ struct MenuBarNotificationListTests {
         sidebar.sections[Repository.ID("/tmp/repo/"), default: .init()].title = "Pretty"
         sidebar.sections[Repository.ID("/tmp/repo/"), default: .init()].color = .teal
       }
-      let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+      let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
       state.sidebarItems[id: working.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
       state.reconcileSidebarForTesting()
 
@@ -133,6 +133,28 @@ struct MenuBarNotificationListTests {
       let tag = sections.repositoryTagByID[Repository.ID("/tmp/repo/")]
       #expect(tag?.repoName == "Pretty")
       #expect(tag?.repoColor == .teal)
+    }
+  }
+
+  @Test func pinnedRowThatNeedsYouIsListedOnlyUnderNeedsYou() {
+    withDependencies {
+      $0.defaultAppStorage = .inMemory
+    } operation: {
+      let pinned = makeWorktree(id: "/tmp/repo/pinned", name: "pinned")
+      var state = RepositoriesFeature.State(
+        reconciledRepositories: [makeRepository(worktrees: [pinned])]
+      )
+      state.$sidebar.withLock { sidebar in
+        sidebar.insert(worktree: pinned.id, in: Repository.ID("/tmp/repo/"), bucket: .pinned)
+      }
+      state.sidebarItems[id: pinned.id]?.agentSnapshot = .init(
+        agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
+        isWorking: false, hasError: false, hasAttention: true, since: Date(timeIntervalSince1970: 5))
+      state.reconcileSidebarForTesting()
+
+      let sections = state.computeMenuBarSections()
+      #expect(sections.needsYou == [pinned.id])
+      #expect(sections.pinned.isEmpty)
     }
   }
 
@@ -153,7 +175,7 @@ struct MenuBarNotificationListTests {
       state.$sidebar.withLock { sidebar in
         sidebar.insert(worktree: pinned.id, in: Repository.ID("/tmp/repo/"), bucket: .pinned)
       }
-      let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+      let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
       state.sidebarItems[id: hot.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
       // Both the Active row and the Pinned row are also unread.
       setRowNotifications(&state, id: hot.id, notifications: [makeNotification(isRead: false)])
@@ -219,7 +241,7 @@ struct MenuBarNotificationListTests {
     state.$sidebar.withLock { sidebar in
       sidebar.insert(worktree: pinned.id, in: Repository.ID("/tmp/repo/"), bucket: .pinned)
     }
-    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     state.sidebarItems[id: working.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
     setRowNotifications(&state, id: noisy.id, notifications: [makeNotification(isRead: false)])
     state.reconcileSidebarForTesting()
@@ -323,6 +345,104 @@ struct MenuBarNotificationListTests {
     #expect(state.computeMenuBarSections().unread.isEmpty)
   }
 
+  @Test func needsYouListsAttentionRowsLongestWaitFirst() {
+    let rowA = makeWorktree(id: "/tmp/repo/wt-a", name: "wt-a")
+    let rowB = makeWorktree(id: "/tmp/repo/wt-b", name: "wt-b")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [rowA, rowB])]
+    )
+    let late = Date(timeIntervalSince1970: 900)
+    let early = Date(timeIntervalSince1970: 100)
+    state.sidebarItems[id: rowA.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .awaitingInput, since: late)],
+      isWorking: false, hasError: false, hasAttention: true, since: late)
+    state.sidebarItems[id: rowB.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .codex, activity: .error, since: early)],
+      isWorking: false, hasError: true, hasAttention: true, since: early)
+    state.reconcileSidebarForTesting()
+
+    let sections = state.computeMenuBarSections()
+
+    #expect(sections.needsYou == [rowB.id, rowA.id])
+    #expect(sections.active.isEmpty)
+    #expect(sections.entries.first?.content == .header("Needs You", .active))
+  }
+
+  @Test func needsYouExcludesArchivedAndIdleRows() {
+    let rowA = makeWorktree(id: "/tmp/repo/wt-a", name: "wt-a")
+    let rowB = makeWorktree(id: "/tmp/repo/wt-b", name: "wt-b")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [rowA, rowB])]
+    )
+    state.sidebarItems[id: rowA.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .busy, since: .distantPast)],
+      isWorking: true, hasError: false, since: .distantPast)
+    state.sidebarItems[id: rowB.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
+      isWorking: false, hasError: false, hasAttention: true, since: .distantPast)
+    state.$sidebar.withLock { sidebar in
+      sidebar.insert(
+        worktree: rowB.id,
+        in: Repository.ID("/tmp/repo/"),
+        bucket: .archived,
+        item: .init(archivedAt: Date(timeIntervalSince1970: 1_000_000))
+      )
+    }
+    state.reconcileSidebarForTesting()
+
+    #expect(state.computeMenuBarSections().needsYou.isEmpty)
+  }
+
+  @Test func needsYouExcludesTerminatingAndMissingRowsAndCountsMatch() {
+    let live = makeWorktree(id: "/tmp/repo/live", name: "live")
+    let dying = makeWorktree(id: "/tmp/repo/dying", name: "dying")
+    let orphan = makeWorktree(id: "/tmp/repo/orphan", name: "orphan")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [live, dying, orphan])]
+    )
+    for worktree in [live, dying, orphan] {
+      state.sidebarItems[id: worktree.id]?.agentSnapshot = .init(
+        agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
+        isWorking: false, hasError: false, hasAttention: true, since: .distantPast)
+    }
+    state.sidebarItems[id: dying.id]?.lifecycle = .deleting
+    state.sidebarItems[id: orphan.id]?.isMissing = true
+
+    #expect(state.needsYouRowIDs() == [live.id])
+    #expect(state.needsYouCount == 1)
+  }
+
+  @Test func attentionRowWithoutStampIsIncludedAndSortsLast() {
+    let stamped = makeWorktree(id: "/tmp/repo/stamped", name: "stamped")
+    let bare = makeWorktree(id: "/tmp/repo/bare", name: "bare")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [stamped, bare])]
+    )
+    state.sidebarItems[id: stamped.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .awaitingInput, since: Date(timeIntervalSince1970: 500))],
+      isWorking: false, hasError: false, hasAttention: true, since: Date(timeIntervalSince1970: 500))
+    state.sidebarItems[id: bare.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
+      isWorking: false, hasError: false, hasAttention: true, since: nil)
+    state.reconcileSidebarForTesting()
+
+    #expect(state.needsYouRowIDs() == [stamped.id, bare.id])
+  }
+
+  @Test func needsYouIncludesAttentionRowWhenBadgesAreOff() {
+    let quiet = makeWorktree(id: "/tmp/repo/quiet", name: "quiet")
+    let waiting = makeWorktree(id: "/tmp/repo/waiting", name: "waiting")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [quiet, waiting])]
+    )
+    // Badges off: the lineup is empty but the records-derived attention flag survives.
+    state.sidebarItems[id: waiting.id]?.agentSnapshot = .init(
+      agents: [], isWorking: false, hasError: false, hasAttention: true, since: Date(timeIntervalSince1970: 10))
+    state.reconcileSidebarForTesting()
+
+    #expect(state.needsYouRowIDs() == [waiting.id])
+  }
+
   @Test func postReduceHookRefreshesTheCache() {
     let worktree = makeWorktree(id: "/tmp/repo/wt", name: "wt")
     var state = RepositoriesFeature.State(
@@ -338,7 +458,7 @@ struct MenuBarNotificationListTests {
     // Agent activity raises only `.sidebarStructure`, so the cache must key off
     // that flag too, or a row the agent hoists to Active would never reach the
     // menu. The row moves from Unread to Active once the agent lands.
-    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     state.sidebarItems[id: worktree.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
     state.applyPostReduceCacheRecomputes(.sidebarStructure)
 

@@ -418,10 +418,10 @@ struct SidebarBranchNestingTests {
 
   @Test func aggregatedIndicators_capsAt3Agents() {
     let agents: [AgentPresenceFeature.AgentInstance] = [
-      .init(agent: .claude, activity: .busy),
-      .init(agent: .codex, activity: .idle),
-      .init(agent: .kiro, activity: .awaitingInput),
-      .init(agent: .pi, activity: .busy),
+      .init(agent: .claude, activity: .busy, since: .distantPast),
+      .init(agent: .codex, activity: .idle, since: .distantPast),
+      .init(agent: .kiro, activity: .awaitingInput, since: .distantPast),
+      .init(agent: .pi, activity: .busy, since: .distantPast),
     ]
     let snapshots: [SidebarBranchNesting.LeafIndicatorSnapshot] = [
       .init(hasUnseenNotifications: false, runningScriptColors: [], agents: Array(agents.prefix(2))),
@@ -430,6 +430,19 @@ struct SidebarBranchNestingTests {
     let indicators = SidebarBranchNesting.aggregateIndicators(from: snapshots)
     #expect(indicators.agents.count == 3)
     #expect(indicators.agents == Array(agents.prefix(3)))
+  }
+
+  @Test func aggregatedIndicators_dedupesAgentsIgnoringSince() {
+    let early = AgentPresenceFeature.AgentInstance(
+      agent: .claude, activity: .busy, since: Date(timeIntervalSince1970: 100))
+    let late = AgentPresenceFeature.AgentInstance(
+      agent: .claude, activity: .busy, since: Date(timeIntervalSince1970: 200))
+    let snapshots: [SidebarBranchNesting.LeafIndicatorSnapshot] = [
+      .init(hasUnseenNotifications: false, runningScriptColors: [], agents: [early]),
+      .init(hasUnseenNotifications: false, runningScriptColors: [], agents: [late]),
+    ]
+    let indicators = SidebarBranchNesting.aggregateIndicators(from: snapshots)
+    #expect(indicators.agents == [early])
   }
 
   // MARK: - ancestorPrefixes.

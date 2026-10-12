@@ -94,6 +94,23 @@ struct SidebarItemFeature {
 
     var addedLines: Int?
     var removedLines: Int?
+    /// Commits HEAD is ahead of / behind the repo's base ref. `nil` until the
+    /// first probe, and `behindCount` is `nil` (not 0) when in sync so the
+    /// accessory renders nothing.
+    var aheadCount: Int?
+    var behindCount: Int?
+    /// The base ref the counts were measured against, for the tooltip and menu.
+    var syncBaseRef: String?
+    /// An ahead/behind probe has completed (even with no result), so `filesChanged`
+    /// stops re-probing; `branchChanged` still refreshes.
+    var hasProbedAheadBehind = false
+    /// A rebase / merge is in flight; the row menu disables sync meanwhile.
+    var isSyncing = false
+    /// Why this row is a cleanup candidate, if it is. Classified by the parent from the
+    /// ahead count, tree cleanliness, last focus and settings; `nil` means not stale.
+    var staleReason: StaleReason?
+    /// Working tree has no tracked or untracked change. `nil` until probed (or when the probe failed).
+    var isTreeClean: Bool?
     var pullRequest: ForgePullRequest?
     /// Branch name at PR-query start; on result land, mismatched results are dropped.
     /// Cleared by the next row dispatch or reconcile; may linger after a refresh
@@ -111,9 +128,21 @@ struct SidebarItemFeature {
     var agentSnapshot: AgentPresenceFeature.RowSnapshot = .init()
     var agents: [AgentPresenceFeature.AgentInstance] { agentSnapshot.agents }
     var hasAgentActivity: Bool { agentSnapshot.isWorking }
+
+    /// Rebase / merge onto the base ref is offered: behind, idle, no agent
+    /// working, not mid-sync. The dirty-tree check is async and runs in the effect.
+    var canSync: Bool {
+      guard let behindCount, behindCount > 0 else { return false }
+      return !isSyncing && !hasAgentActivity && !isMissing && lifecycle == .idle && !isMainWorktree
+    }
     /// An agent on this row stopped on an error. Sticky until it restarts or the
     /// user focuses the surface, and the top-priority Active-rail bucket.
     var hasAgentError: Bool { agentSnapshot.hasError }
+    /// An agent is parked on the user (awaiting input or errored). The one rule
+    /// behind the Active ordering, the menu bar's Needs You section and the jump command.
+    var needsAttention: Bool { agentSnapshot.hasAttention }
+    /// When the wait began; a missing stamp sorts last (`distantFuture`).
+    var attentionSince: Date { agentSnapshot.since ?? .distantFuture }
 
     var surfaceIDs: [UUID] = []
     /// Sticky once `terminalProjectionChanged` arrives, so a subsequent
@@ -141,6 +170,10 @@ struct SidebarItemFeature {
   enum Action: Equatable, Sendable {
     case lifecycleChanged(State.Lifecycle)
     case diffStatsChanged(added: Int?, removed: Int?)
+    case aheadBehindChanged(ahead: Int?, behind: Int?, base: String?)
+    case syncStateChanged(Bool)
+    case staleReasonChanged(StaleReason?)
+    case treeCleanChanged(Bool?)
     case pullRequestQueryStarted(branch: String)
     case pullRequestChanged(ForgePullRequest?, branchAtQueryTime: String)
     case pullRequestDetailApplied(pullRequestNumber: Int, ForgePullRequestDetail)
@@ -163,6 +196,32 @@ struct SidebarItemFeature {
         guard state.addedLines != added || state.removedLines != removed else { return .none }
         state.addedLines = added
         state.removedLines = removed
+        return .none
+
+      case .aheadBehindChanged(let ahead, let behind, let base):
+        let nextBehind: Int? = (behind ?? 0) == 0 ? nil : behind
+        guard !state.hasProbedAheadBehind || state.aheadCount != ahead || state.behindCount != nextBehind
+          || state.syncBaseRef != base
+        else { return .none }
+        state.hasProbedAheadBehind = true
+        state.aheadCount = ahead
+        state.behindCount = nextBehind
+        state.syncBaseRef = base
+        return .none
+
+      case .staleReasonChanged(let reason):
+        guard state.staleReason != reason else { return .none }
+        state.staleReason = reason
+        return .none
+
+      case .treeCleanChanged(let isClean):
+        guard state.isTreeClean != isClean else { return .none }
+        state.isTreeClean = isClean
+        return .none
+
+      case .syncStateChanged(let flag):
+        guard state.isSyncing != flag else { return .none }
+        state.isSyncing = flag
         return .none
 
       case .pullRequestQueryStarted(let branch):
@@ -408,6 +467,8 @@ struct SidebarContextRow: Equatable, Sendable, Identifiable {
   let isAttached: Bool
   let host: RemoteHost?
   let workingDirectoryPath: String
+  let syncBaseRef: String?
+  let canSync: Bool
 
   init(_ row: SidebarItemFeature.State) {
     self.id = row.id
@@ -421,6 +482,8 @@ struct SidebarContextRow: Equatable, Sendable, Identifiable {
     self.isAttached = row.isAttached
     self.host = row.host
     self.workingDirectoryPath = row.workingDirectoryPath
+    self.syncBaseRef = row.syncBaseRef
+    self.canSync = row.canSync
   }
 
   var isFolder: Bool { kind == .folder }

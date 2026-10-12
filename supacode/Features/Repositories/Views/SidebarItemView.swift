@@ -541,12 +541,24 @@ private struct TrailingView: View {
           DiffStatsContent(addedLines: added, removedLines: removed)
             .equatable()
         }
+        if let behind = store.behindCount {
+          BehindCountContent(behind: behind, base: store.syncBaseRef ?? "base")
+            .equatable()
+        }
+        if let reason = store.staleReason, !store.isPinned {
+          StaleIndicatorContent(reason: reason)
+            .equatable()
+        }
         if let prText {
           PullRequestBadgeContent(text: prText)
             .equatable()
         }
         if !agents.isEmpty {
-          RunningAgentsBadgeContent(agents: agents)
+          RunningAgentsBadgeContent(
+            agents: agents,
+            since: store.agentSnapshot.since,
+            showsElapsed: agents.contains { $0.activity.isAttention }
+          )
             .equatable()
         }
         if hasStatus {
@@ -601,9 +613,20 @@ private struct PullRequestBadgeContent: View, Equatable {
 
 private struct RunningAgentsBadgeContent: View, Equatable {
   let agents: [AgentPresenceFeature.AgentInstance]
+  /// Earliest attention (else working) timestamp from the row's `agentSnapshot`.
+  let since: Date?
+  let showsElapsed: Bool
 
   var body: some View {
-    AgentAvatarGroupView(instances: agents, size: 16)
+    HStack(spacing: 4) {
+      AgentAvatarGroupView(instances: agents, size: 16)
+      if showsElapsed, let since {
+        ElapsedLabel(
+          since: since,
+          stateLabel: agents.contains { $0.activity == .awaitingInput } ? "waiting" : "errored"
+        )
+      }
+    }
   }
 }
 
@@ -628,6 +651,33 @@ private struct DiffStatsContent: View, Equatable {
     .appFont(.caption)
     .monospacedDigit()
     .transition(.blurReplace)
+  }
+}
+
+private struct BehindCountContent: View, Equatable {
+  let behind: Int
+  let base: String
+
+  var body: some View {
+    Label("\(behind)", systemImage: "arrow.down")
+      .labelStyle(.titleAndIcon)
+      .appFont(.caption)
+      .monospacedDigit()
+      .foregroundStyle(.secondary)
+      .help("\(behind) commit\(behind == 1 ? "" : "s") behind \(base)")
+      .accessibilityLabel("\(behind) commits behind \(base)")
+  }
+}
+
+private struct StaleIndicatorContent: View, Equatable {
+  let reason: StaleReason
+
+  var body: some View {
+    Image(systemName: "clock.badge.xmark")
+      .appFont(.caption)
+      .foregroundStyle(.tertiary)
+      .help(reason.title)
+      .accessibilityLabel("Stale: \(reason.title)")
   }
 }
 

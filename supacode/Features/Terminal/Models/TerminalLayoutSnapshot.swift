@@ -95,6 +95,8 @@ nonisolated struct TerminalLayoutSnapshot: Codable, Equatable, Sendable {
     let agent: String
     let pids: [Int32]
     let activity: String
+    /// Added 2026-10. Optional so snapshots written before it still decode.
+    let activitySince: Date?
   }
 
 }
