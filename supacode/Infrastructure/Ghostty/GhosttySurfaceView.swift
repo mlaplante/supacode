@@ -356,7 +356,7 @@ final class GhosttySurfaceView: NSView, Identifiable {
     // nsview.
     let retainedRuntime = Unmanaged.passRetained(runtime)
     let retainedBridge = Unmanaged.passRetained(bridge)
-    DispatchQueue.main.async {
+    GhosttySurfaceFreeQueue.enqueue {
       ghostty_surface_free(surface)
       retainedBridge.release()
       retainedRuntime.release()
@@ -417,6 +417,21 @@ final class GhosttySurfaceView: NSView, Identifiable {
           self?.applyWindowBackgroundAppearance()
         }
       })
+    // Sleep/wake and display reconfiguration can leave the renderer holding a
+    // stale scale or a half-drawn frame; neither reaches a view through the
+    // window notifications above, so resync and repaint explicitly.
+    for name in [
+      NSWorkspace.didWakeNotification,
+      NSWorkspace.screensDidWakeNotification,
+      NSApplication.didChangeScreenParametersNotification,
+    ] {
+      notificationObservers.append(
+        center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+          Task { @MainActor [weak self] in
+            self?.resyncAfterDisplayChange()
+          }
+        })
+    }
     notificationObservers.append(
       center.addObserver(
         forName: .ghosttyRuntimeConfigDidChange,
@@ -441,6 +456,25 @@ final class GhosttySurfaceView: NSView, Identifiable {
     DispatchQueue.main.async { [weak self] in
       self?.viewDidChangeBackingProperties()
     }
+  }
+
+  /// After the machine or its displays wake, or the display set changes, push
+  /// the current display id, scale and size again and ask the renderer for a
+  /// full repaint. Only a mounted view has a trustworthy scale; a detached one
+  /// resyncs on its next `viewDidMoveToWindow`.
+  private func resyncAfterDisplayChange() {
+    guard surface != nil, window != nil else { return }
+    windowDidChangeScreen()
+    updateContentScale()
+    updateSurfaceSize()
+    repaint()
+  }
+
+  /// Full redraw of the current terminal state, independent of the damage the
+  /// renderer tracked itself.
+  private func repaint() {
+    guard let surface else { return }
+    ghostty_surface_refresh(surface)
   }
 
   private func clearNotificationObservers() {
@@ -487,6 +521,7 @@ final class GhosttySurfaceView: NSView, Identifiable {
         }
       }
     }
+    let isRemount = window != nil && hasBeenInWindow
     if window != nil {
       hasBeenInWindow = true
     }
@@ -494,6 +529,12 @@ final class GhosttySurfaceView: NSView, Identifiable {
     updateContentScale()
     notifySizeChanged()
     applyWindowBackgroundAppearance()
+    // A surface reparented back in (worktree switch, split rebuild) may hold a
+    // frame drawn for its old bounds; repaint so no stale cells linger under
+    // the new layout.
+    if isRemount {
+      repaint()
+    }
   }
 
   override func viewDidChangeEffectiveAppearance() {

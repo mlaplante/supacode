@@ -41,7 +41,8 @@ struct AppFeatureSettingsChangedTests {
     await store.finish()
   }
 
-  @Test(.dependencies) func togglingAgentPresenceBadgesFansOutClearedSnapshots() async {
+  @Test(.dependencies { $0.continuousClock = ImmediateClock() })
+  func togglingAgentPresenceBadgesFansOutClearedSnapshots() async {
     let rootURL = URL(fileURLWithPath: "/tmp/repo")
     let worktree = Worktree(
       id: "/tmp/repo/wt-feature",

@@ -46,7 +46,7 @@ TEST_RESULT_BUNDLE := build/supacode-tests.xcresult
 SELECT_DEVELOPER_DIR = DEVELOPER_DIR="$$(./scripts/select-developer-dir.sh)"; export DEVELOPER_DIR
 
 .DEFAULT_GOAL := help
-.PHONY: doctor preflight build-ghostty-xcframework build-zmx generate-project generate-project-sources inspect-dependencies warm-cache build-app run-app install-dev-build archive export-archive format lint check test bump-version bump-and-release log-stream
+.PHONY: doctor preflight build-ghostty-xcframework build-zmx generate-project generate-project-sources inspect-dependencies warm-cache build-app build-app-release run-app install-dev-build install-release-build archive export-archive format lint check test bump-version bump-and-release log-stream
 
 ifdef CI
 TUIST_INSTALL_FLAGS := --force-resolved-versions
@@ -122,6 +122,28 @@ run-app: build-app # Build then launch (Debug) with log streaming
 install-dev-build: build-app # install dev build to /Applications
 	@$(SELECT_DEVELOPER_DIR); \
 	settings="$$(xcodebuild -workspace "$(PROJECT_WORKSPACE)" -scheme "$(APP_SCHEME)" -configuration Debug -derivedDataPath "$(DERIVED_DATA_PATH)" -showBuildSettings -json 2>/dev/null)"; \
+	build_dir="$$(echo "$$settings" | jq -r '.[0].buildSettings.BUILT_PRODUCTS_DIR')"; \
+	product="$$(echo "$$settings" | jq -r '.[0].buildSettings.FULL_PRODUCT_NAME')"; \
+	src="$$build_dir/$$product"; \
+	dst="/Applications/$$product"; \
+	if [ ! -d "$$src" ]; then \
+		echo "app not found: $$src"; \
+		exit 1; \
+	fi; \
+	echo "copying $$src -> $$dst"; \
+	rm -rf "$$dst"; \
+	ditto "$$src" "$$dst"; \
+	echo "installed $$dst"
+
+build-app-release: $(TUIST_RELEASE_GENERATION_STAMP) # Build the macOS app (Release, local signing)
+	$(SELECT_DEVELOPER_DIR); \
+	bash -o pipefail -c 'xcodebuild -workspace "$(PROJECT_WORKSPACE)" -scheme "$(APP_SCHEME)" -configuration Release -derivedDataPath "$(DERIVED_DATA_PATH)" build -skipMacroValidation $(XCODEBUILD_FLAGS) 2>&1 | { mise exec -- xcbeautify --disable-logging || cat; }'
+
+# Debug builds run TCA and SwiftUI at -Onone and print every log line, which
+# scales badly with worktree count. Daily use should install this target.
+install-release-build: build-app-release # Install optimized Release build to /Applications
+	@$(SELECT_DEVELOPER_DIR); \
+	settings="$$(xcodebuild -workspace "$(PROJECT_WORKSPACE)" -scheme "$(APP_SCHEME)" -configuration Release -derivedDataPath "$(DERIVED_DATA_PATH)" -showBuildSettings -json 2>/dev/null)"; \
 	build_dir="$$(echo "$$settings" | jq -r '.[0].buildSettings.BUILT_PRODUCTS_DIR')"; \
 	product="$$(echo "$$settings" | jq -r '.[0].buildSettings.FULL_PRODUCT_NAME')"; \
 	src="$$build_dir/$$product"; \

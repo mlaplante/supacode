@@ -260,7 +260,8 @@ struct AppFeatureTerminalSetupScriptTests {
     await store.finish()
   }
 
-  @Test(.dependencies) func projectionWithoutSurfacesKeepsPending() async {
+  @Test(.dependencies { $0.continuousClock = ImmediateClock() })
+  func projectionWithoutSurfacesKeepsPending() async {
     // An empty projection is not readiness: the pending latch must survive it.
     let worktree = makeWorktree()
     let repositoriesState = makeRepositoriesState(

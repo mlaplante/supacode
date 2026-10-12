@@ -717,6 +717,20 @@ struct WorktreeInfoWatcherManagerTests {
     try FileManager.default.removeItem(at: linked.tempRoot)
   }
 
+  @Test func fileEventExclusionsCoverTheWorkingTreeOnlyAndRespectTheFSEventsCap() {
+    let workingTree = URL(fileURLWithPath: "/tmp/wt")
+    let adminDir = URL(fileURLWithPath: "/tmp/repo/.git/worktrees/wt")
+
+    let paths = WorktreeFileEventMonitor.exclusionPaths(for: [workingTree, adminDir])
+
+    #expect(paths.count <= WorktreeFileEventMonitor.maxExclusionPaths)
+    #expect(paths.contains("/tmp/wt/node_modules"))
+    #expect(paths.contains("/tmp/wt/.build"))
+    // The admin dir is small and must stay fully watched.
+    #expect(paths.allSatisfy { $0.hasPrefix("/tmp/wt/") })
+    #expect(WorktreeFileEventMonitor.exclusionPaths(for: []).isEmpty)
+  }
+
   @Test func fileEventRootsIsJustTheWorkingTreeForAnEmbeddedGitDir() throws {
     let tempWorktree = try makeTempWorktree()
     let manager = WorktreeInfoWatcherManager()

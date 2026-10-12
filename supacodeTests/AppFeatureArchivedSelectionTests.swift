@@ -189,7 +189,8 @@ struct AppFeatureArchivedSelectionTests {
     )
   }
 
-  @Test(.dependencies) func repositoriesChangedRehydratesAgentPresenceFromRestore() async {
+  @Test(.dependencies { $0.continuousClock = ImmediateClock() })
+  func repositoriesChangedRehydratesAgentPresenceFromRestore() async {
     let rootURL = URL(fileURLWithPath: "/tmp/repo")
     let worktree = Worktree(
       id: "/tmp/repo/wt-feature",
@@ -241,12 +242,16 @@ struct AppFeatureArchivedSelectionTests {
         AgentPresenceFeature.AgentInstance(agent: .claude, activity: .awaitingInput)
       ]
     }
+    // The agent tick parks its structure rebuild; the immediate clock flushes it.
+    await store.receive(\.repositories.flushCoalescedCacheRecomputes)
     await store.finish()
     let row = store.state.repositories.sidebarItems[id: worktree.id]
     #expect(row?.hasAgentAwaitingInput == true)
     // Drained, so it won't re-fire on subsequent `repositoriesChanged`.
     #expect(store.state.repositories.pendingAgentRehydrateSurfaces.isEmpty)
-    // User-visible invariant: the row is in the Active hoist now.
+    // The coalesced structure rebuild has flushed, so the row is in the
+    // Active hoist now (user-visible invariant).
+    #expect(store.state.repositories.pendingCoalescedInvalidations.isEmpty)
     let activeRowIDs = store.state.repositories.sidebarStructure.sections.flatMap {
       section -> [Worktree.ID] in
       if case .highlight(let kind, let rowIDs) = section, kind == .active { return rowIDs }

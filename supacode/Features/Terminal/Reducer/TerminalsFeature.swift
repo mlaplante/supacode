@@ -117,7 +117,10 @@ struct TerminalsFeature {
         // The element reducer already ran; any topology change may flip tab
         // visibility, so re-diff the grace timers and fire the app-shell
         // hooks (persistence debounce, sidebar projection).
-        let hibernation = Self.canAffectVisibility(action) ? reconcileHibernation(&state) : .none
+        // A topology change inside one worktree can only flip that worktree's
+        // tabs; the selection and recency inputs are untouched, so the other
+        // layouts need no re-diff.
+        let hibernation = Self.canAffectVisibility(action) ? reconcileHibernation(&state, in: worktreeID) : .none
         return .merge(
           hibernation,
           .run { _ in await layoutChangeObserver.layoutChanged(worktreeID) }
@@ -248,8 +251,14 @@ extension TerminalsFeature {
   }
 
   /// Diffs the hidden set against armed timers and wakes newly visible
-  /// hibernated tabs. Cheap enough to run after every layout action.
-  private func reconcileHibernation(_ state: inout State) -> Effect<Action> {
+  /// hibernated tabs.
+  ///
+  /// Pass `scope` to re-diff one worktree only: a tab or pane action in that
+  /// worktree cannot change another worktree's visibility, so with many
+  /// worktrees open the per-action cost stays proportional to one layout, not
+  /// every pane and tab in the app. The global inputs (selection, recency,
+  /// the flag, memory pressure) still take the full pass.
+  private func reconcileHibernation(_ state: inout State, in scope: Worktree.ID? = nil) -> Effect<Action> {
     @Shared(.settingsFile) var settingsFile: SettingsFile
     let enabled = settingsFile.global.terminalHibernationEnabled
     // Tabs that should hold an armed grace timer this pass; anything armed and
@@ -257,7 +266,13 @@ extension TerminalsFeature {
     var keepArmed: Set<TabID> = []
     var allTabs: Set<TabID> = []
     var effects: [Effect<Action>] = []
-    for layout in state.layouts {
+    let layouts: [LayoutFeature.State] =
+      if let scope {
+        state.layouts[id: scope].map { [$0] } ?? []
+      } else {
+        Array(state.layouts)
+      }
+    for layout in layouts {
       let visiblePanes = Set(layout.layout.tree.visibleLeaves())
       for pane in layout.layout.panes {
         let showsContent = Self.paneShowsContent(
@@ -300,15 +315,21 @@ extension TerminalsFeature {
         }
       }
     }
+    // A scoped pass only saw its own worktree's tabs; every tab still present
+    // elsewhere keeps its bookkeeping, while a tab that vanished anywhere
+    // (closed, or its worktree detached) is pruned as in the full pass.
+    let liveTabs: Set<TabID> =
+      scope == nil ? allTabs : Set(state.layouts.flatMap { $0.layout.panes.flatMap(\.tabs.ids) })
     // Cancel any armed tab no longer eligible: visible, vanished, recency-covered,
     // renderer gone (hibernated), or the flag flipped off.
     for armed in state.hibernationArmedTabs where !keepArmed.contains(armed) {
+      if scope != nil, !allTabs.contains(armed), liveTabs.contains(armed) { continue }
       state.hibernationArmedTabs.remove(armed)
       state.hibernationDeferralLogged.remove(armed)
       effects.append(.cancel(id: HibernationTimerID.tab(armed)))
     }
-    state.wakeRequestedTabs.formIntersection(allTabs)
-    state.hibernationDeferralLogged.formIntersection(allTabs)
+    state.wakeRequestedTabs.formIntersection(liveTabs)
+    state.hibernationDeferralLogged.formIntersection(liveTabs)
     return effects.isEmpty ? .none : .merge(effects)
   }
 

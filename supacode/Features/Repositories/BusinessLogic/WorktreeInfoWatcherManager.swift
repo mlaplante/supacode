@@ -6,7 +6,7 @@ import SupacodeSettingsShared
 
 private let watcherLogger = SupaLogger("WorktreeInfoWatcher")
 
-private final class WorktreeFileEventMonitor {
+final class WorktreeFileEventMonitor {
   let rootURLs: [URL]
   private let onEvent: @MainActor @Sendable () -> Void
   private nonisolated(unsafe) var stream: FSEventStreamRef?
@@ -54,7 +54,16 @@ private final class WorktreeFileEventMonitor {
     guard let stream else {
       return nil
     }
-    FSEventStreamSetDispatchQueue(stream, DispatchQueue.main)
+    // Deliver off the main thread: with many worktrees under active agents the
+    // per-file batches add up, and the callback only needs to hop one debounce
+    // signal to the main actor. Build artifacts and dependency trees churn the
+    // most and never change the diff stat, so they are excluded at the source
+    // (FSEvents caps exclusions at eight paths per stream).
+    FSEventStreamSetDispatchQueue(stream, Self.deliveryQueue)
+    let exclusions = Self.exclusionPaths(for: rootURLs)
+    if !exclusions.isEmpty {
+      FSEventStreamSetExclusionPaths(stream, exclusions as CFArray)
+    }
     guard FSEventStreamStart(stream) else {
       FSEventStreamInvalidate(stream)
       FSEventStreamRelease(stream)
@@ -69,6 +78,28 @@ private final class WorktreeFileEventMonitor {
 
   func cancel() {
     Self.release(&stream)
+  }
+
+  /// One serial utility queue shared by every worktree's stream.
+  private nonisolated static let deliveryQueue = DispatchQueue(
+    label: "supacode.worktree-file-events",
+    qos: .utility
+  )
+
+  /// Heaviest-churn directories, excluded under the working tree only (the
+  /// first root); the admin-dir root is small and must stay fully watched.
+  nonisolated static let excludedDirectoryNames = [
+    "node_modules", ".build", "target", ".venv", "DerivedData", "dist", ".next", "vendor",
+  ]
+
+  /// FSEvents accepts at most eight exclusion paths per stream.
+  nonisolated static let maxExclusionPaths = 8
+
+  nonisolated static func exclusionPaths(for rootURLs: [URL]) -> [String] {
+    guard let workingTree = rootURLs.first else { return [] }
+    return excludedDirectoryNames.prefix(maxExclusionPaths).map {
+      workingTree.appending(path: $0).path(percentEncoded: false)
+    }
   }
 
   private nonisolated static func release(_ stream: inout FSEventStreamRef?) {

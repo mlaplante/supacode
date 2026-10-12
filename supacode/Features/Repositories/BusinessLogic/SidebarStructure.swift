@@ -146,6 +146,12 @@ struct SidebarItemGroup: Identifiable, Equatable, Sendable {
   let slot: Slot
   let repositoryID: Repository.ID
   let rowIDs: [SidebarItemID]
+  /// The rows the view renders for this slot, branch headers included when
+  /// nesting is on. Derived here, in the reducer's structure pass, so the view
+  /// never reads per-leaf `branchName`s in its body: that read would
+  /// observation-track every row at the group and re-render the whole bucket
+  /// on any one row's tick.
+  var nestedRows: [SidebarBranchNesting.Row] = []
 
   var id: Slot { slot }
 
@@ -405,6 +411,10 @@ struct CacheInvalidations: OptionSet {
   ]
   /// Every bit: the row-derived caches plus the roster-scoped open-action resolution.
   static let all: CacheInvalidations = [.allSidebar, .openActionResolution]
+  /// The whole-roster rebuilds a per-leaf tick may defer to the coalescing
+  /// window (`RepositoriesFeature.structureCoalesceWindow`). The selection
+  /// slices stay out: they are O(selection) and gate toolbar state directly.
+  static let coalescable: CacheInvalidations = [.sidebarStructure, .toolbarNotificationGroups]
 }
 
 extension SidebarItemFeature.Action {
@@ -435,6 +445,21 @@ extension SidebarItemFeature.Action {
 }
 
 extension RepositoriesFeature.Action {
+  /// Per-leaf ticks that fire once per worktree per change and may defer their
+  /// `.coalescable` bits to the coalescing window. Everything else recomputes
+  /// synchronously. Keep this an allowlist: a user-driven action here would
+  /// make the sidebar lag the click by a window.
+  var coalescesStructureRecompute: Bool {
+    switch self {
+    case .sidebarItems(.element(id: _, action: .agentSnapshotChanged)),
+      .sidebarItems(.element(id: _, action: .terminalProjectionChanged)),
+      .worktreeLineChangesLoaded:
+      return true
+    default:
+      return false
+    }
+  }
+
   /// Exhaustive cache-invalidation map. Update this alongside every new
   /// `RepositoriesFeature.Action` case. Adding a case without listing it here
   /// is a compile error (no `default`), so we never silently regress the
@@ -480,6 +505,10 @@ extension RepositoriesFeature.Action {
     // arm, and `.openActionsResolved` only stores its result. Neither may re-arm
     // resolution, or the two would feed each other.
     case .resolveOpenActions, .openActionsResolved:
+      return []
+
+    // The flush applies the parked bits itself inside the post-reduce hook.
+    case .flushCoalescedCacheRecomputes:
       return []
 
     // Worktree-set changes inside an unchanged repo roster.
@@ -1180,28 +1209,65 @@ extension SidebarItemGroup {
     let isSoleDefaultWorktree =
       mainID != nil && pinnedTail.isEmpty && pendingTail.isEmpty && unpinnedTail.isEmpty
 
+    let mainRowIDs = mainID.map { [$0] } ?? []
     return [
       SidebarItemGroup(
         slot: .main(isSole: isSoleDefaultWorktree),
         repositoryID: repositoryID,
-        rowIDs: mainID.map { [$0] } ?? []
+        rowIDs: mainRowIDs,
+        nestedRows: Self.leafRows(mainRowIDs)
       ),
       SidebarItemGroup(
         slot: .pinnedTail,
         repositoryID: repositoryID,
-        rowIDs: pinnedTail
+        rowIDs: pinnedTail,
+        nestedRows: nestedRows(
+          pinnedTail, bucket: .pinned, in: state, repositoryID: repositoryID, nest: nestWorktreesByBranch)
       ),
       SidebarItemGroup(
         slot: .pending,
         repositoryID: repositoryID,
-        rowIDs: pendingTail
+        rowIDs: pendingTail,
+        nestedRows: Self.leafRows(pendingTail)
       ),
       SidebarItemGroup(
         slot: .unpinnedTail,
         repositoryID: repositoryID,
-        rowIDs: unpinnedTail
+        rowIDs: unpinnedTail,
+        nestedRows: nestedRows(
+          unpinnedTail, bucket: .unpinned, in: state, repositoryID: repositoryID, nest: nestWorktreesByBranch)
       ),
     ]
+  }
+
+  private static func leafRows(_ ids: [SidebarItemID]) -> [SidebarBranchNesting.Row] {
+    ids.map { .leaf(id: $0, depth: 0, displayName: nil) }
+  }
+
+  /// Branch-nested rows for one tail, folding the bucket's collapsed prefixes
+  /// in. Mirrors `RepositoriesFeature.State.branchNestingRowIDs`, which the
+  /// hotkey / arrow projection uses, so both walk the same visible order.
+  private static func nestedRows(
+    _ ids: [SidebarItemID],
+    bucket: SidebarBucket,
+    in state: RepositoriesFeature.State,
+    repositoryID: Repository.ID,
+    nest: Bool
+  ) -> [SidebarBranchNesting.Row] {
+    guard nest, !ids.isEmpty else { return leafRows(ids) }
+    let collapsedPrefixes = state.sidebar.sections[repositoryID]?.buckets[bucket]?.collapsedBranchPrefixes ?? []
+    // `uniquingKeysWith` so a transient duplicate row ID can't crash the structure pass.
+    let branchNames = Dictionary(
+      ids.compactMap { id -> (SidebarItemID, String)? in
+        state.sidebarItems[id: id].map { (id, $0.branchName) }
+      },
+      uniquingKeysWith: { first, _ in first }
+    )
+    return SidebarBranchNesting.buildRows(
+      itemIDs: ids,
+      branchNames: branchNames,
+      collapsedPrefixes: collapsedPrefixes
+    )
   }
 
   /// Case-insensitive sort by `branchName`, matching `SidebarBranchNesting.buildRows`.

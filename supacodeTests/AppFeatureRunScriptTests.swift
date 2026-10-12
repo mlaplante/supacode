@@ -82,7 +82,8 @@ struct AppFeatureRunScriptTests {
     #expect(sentDefinition.command == "npm run dev")
   }
 
-  @Test(.dependencies) func projectionAddsMissedRunningScript() async {
+  @Test(.dependencies { $0.continuousClock = ImmediateClock() })
+  func projectionAddsMissedRunningScript() async {
     // A projection carrying a script the row doesn't track (e.g. the start
     // landed before the row existed) reconciles the row to terminal truth.
     let worktree = makeWorktree()
@@ -104,11 +105,17 @@ struct AppFeatureRunScriptTests {
       $0.repositories.sidebarItems[id: worktree.id]?.hasTerminalProjection = true
       $0.repositories.sidebarItems[id: worktree.id]?.runningScripts[id: definition.id] =
         .init(id: definition.id, tint: definition.resolvedTintColor)
-      $0.repositories.applyPostReduceCacheRecomputes()
+      $0.repositories.pendingCoalescedInvalidations = .coalescable
+      $0.repositories.applyCacheRecomputes(.selectedWorktreeSlice)
+    }
+    await store.receive(\.repositories.flushCoalescedCacheRecomputes) {
+      $0.repositories.pendingCoalescedInvalidations = []
+      $0.repositories.applyPostReduceCacheRecomputes(.coalescable)
     }
   }
 
-  @Test(.dependencies) func projectionClearsPhantomRunningScript() async {
+  @Test(.dependencies { $0.continuousClock = ImmediateClock() })
+  func projectionClearsPhantomRunningScript() async {
     // A projection with no tracked scripts clears a stale row entry, so the
     // toolbar can't keep offering "Stop" for a process that's gone (#573).
     let worktree = makeWorktree()
@@ -132,7 +139,12 @@ struct AppFeatureRunScriptTests {
     await store.receive(\.repositories.sidebarItems) {
       $0.repositories.sidebarItems[id: worktree.id]?.hasTerminalProjection = true
       $0.repositories.sidebarItems[id: worktree.id]?.runningScripts.removeAll()
-      $0.repositories.applyPostReduceCacheRecomputes()
+      $0.repositories.pendingCoalescedInvalidations = .coalescable
+      $0.repositories.applyCacheRecomputes(.selectedWorktreeSlice)
+    }
+    await store.receive(\.repositories.flushCoalescedCacheRecomputes) {
+      $0.repositories.pendingCoalescedInvalidations = []
+      $0.repositories.applyPostReduceCacheRecomputes(.coalescable)
     }
   }
 
@@ -205,7 +217,8 @@ struct AppFeatureRunScriptTests {
     )
   }
 
-  @Test(.dependencies) func projectionStripsRunningScriptsForArchivedRow() async {
+  @Test(.dependencies { $0.continuousClock = ImmediateClock() })
+  func projectionStripsRunningScriptsForArchivedRow() async {
     // Mirrors `reconcileSidebarItems`: archived rows render no running-state
     // dots, so terminal truth must not re-inject them through the projection.
     let worktree = makeWorktree()
@@ -225,14 +238,20 @@ struct AppFeatureRunScriptTests {
     )
     await store.receive(\.repositories.sidebarItems) {
       $0.repositories.sidebarItems[id: worktree.id]?.hasTerminalProjection = true
-      $0.repositories.applyPostReduceCacheRecomputes()
+      $0.repositories.pendingCoalescedInvalidations = .coalescable
+      $0.repositories.applyCacheRecomputes(.selectedWorktreeSlice)
+    }
+    await store.receive(\.repositories.flushCoalescedCacheRecomputes) {
+      $0.repositories.pendingCoalescedInvalidations = []
+      $0.repositories.applyPostReduceCacheRecomputes(.coalescable)
     }
     #expect(
       store.state.repositories.sidebarItems[id: worktree.id]?.runningScripts.isEmpty == true
     )
   }
 
-  @Test(.dependencies) func projectionKeepsRunningScriptsForArchivedDeletingRow() async {
+  @Test(.dependencies { $0.continuousClock = ImmediateClock() })
+  func projectionKeepsRunningScriptsForArchivedDeletingRow() async {
     // The strip's `.deletingScript` exception: a row mid-delete keeps its
     // running-state dots, mirroring `reconcileSidebarItems`.
     let worktree = makeWorktree()
@@ -256,7 +275,12 @@ struct AppFeatureRunScriptTests {
       $0.repositories.sidebarItems[id: worktree.id]?.hasTerminalProjection = true
       $0.repositories.sidebarItems[id: worktree.id]?.runningScripts[id: definition.id] =
         .init(id: definition.id, tint: definition.resolvedTintColor)
-      $0.repositories.applyPostReduceCacheRecomputes()
+      $0.repositories.pendingCoalescedInvalidations = .coalescable
+      $0.repositories.applyCacheRecomputes(.selectedWorktreeSlice)
+    }
+    await store.receive(\.repositories.flushCoalescedCacheRecomputes) {
+      $0.repositories.pendingCoalescedInvalidations = []
+      $0.repositories.applyPostReduceCacheRecomputes(.coalescable)
     }
   }
 

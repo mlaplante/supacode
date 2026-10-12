@@ -49,7 +49,7 @@ private struct SidebarItemsDragOverlay: View {
     ForEach(groups) { group in
       SidebarItemGroupView(
         repository: repository,
-        rowIDs: group.rowIDs,
+        nestedBranchRows: group.nestedRows,
         store: store,
         terminalManager: terminalManager,
         isRepositoryRemoving: isRepositoryRemoving,
@@ -64,7 +64,9 @@ private struct SidebarItemsDragOverlay: View {
 
 private struct SidebarItemGroupView: View {
   let repository: Repository
-  let rowIDs: [SidebarItemID]
+  /// Rows precomputed by the structure pass (`SidebarItemGroup.nestedRows`);
+  /// the view walks them in order and never derives nesting itself.
+  let nestedBranchRows: [SidebarBranchNesting.Row]
   @Bindable var store: StoreOf<RepositoriesFeature>
   let terminalManager: WorktreeTerminalManager
   let isRepositoryRemoving: Bool
@@ -74,19 +76,7 @@ private struct SidebarItemGroupView: View {
   let nestWorktreesByBranch: Bool
 
   var body: some View {
-    let bucketID = moveBehavior.bucketID
-    let groupingActive = nestWorktreesByBranch && bucketID != nil
-    let nestedBranchRows: [SidebarBranchNesting.Row] =
-      if groupingActive, let bucketID {
-        SidebarBranchNesting.buildRows(
-          itemIDs: rowIDs,
-          branchNames: branchNames(for: rowIDs),
-          collapsedPrefixes: store.state.sidebar.sections[repository.id]?.buckets[bucketID]?
-            .collapsedBranchPrefixes ?? []
-        )
-      } else {
-        rowIDs.map { .leaf(id: $0, depth: 0, displayName: nil) }
-      }
+    let groupingActive = nestWorktreesByBranch && moveBehavior.bucketID != nil
 
     // A no-op `.onMove` still steals the repo-level reorder gesture, so omit it
     // for single-row groups. Grouping suppresses reorder for the entire bucket:
@@ -144,28 +134,15 @@ private struct SidebarItemGroupView: View {
     }
   }
 
-  /// Read every row's branchName through a per-leaf scoped child store so
-  /// SwiftUI's observation graph is bounded to the leaf's own branchName
-  /// rather than tracking the full `sidebarItems` IdentifiedArray. Without
-  /// this, every per-row tick (agent storm, notification, running-script
-  /// update) would invalidate the parent. See AGENTS.md "Sidebar performance".
-  private func branchNames(for ids: [SidebarItemID]) -> [SidebarItemID: String] {
-    var result: [SidebarItemID: String] = [:]
-    for id in ids {
-      guard
-        let leafStore = store.scope(
-          state: \.sidebarItems[id: id], action: \.sidebarItems[id: id]
-        )
-      else { continue }
-      result[id] = leafStore.state.branchName
-    }
-    return result
-  }
-
   private func moveRows(_ offsets: IndexSet, _ destination: Int) {
-    // `rowIDs` here is the post-hoisting visible list; the full bucket lives
-    // on `sidebar.sections`. Translate against the full order so hoisted
-    // siblings keep their relative positions across the move.
+    // The visible list is the post-hoisting leaf order (nesting is off when a
+    // move is allowed, so every row is a leaf); the full bucket lives on
+    // `sidebar.sections`. Translate against the full order so hoisted siblings
+    // keep their relative positions across the move.
+    let rowIDs = nestedBranchRows.compactMap { row -> SidebarItemID? in
+      if case .leaf(let id, _, _) = row { return id }
+      return nil
+    }
     let target: (repositoryID: Repository.ID, bucket: SidebarBucket)
     switch moveBehavior {
     case .disabled: return

@@ -82,7 +82,12 @@ struct TerminalsFeatureTests {
   }
 
   /// One worktree, one pane, two tabs; both contents live in the runtime.
-  private func makeHibernationHarness(startSessions: Bool = true) -> HibernationHarness {
+  /// `additionalLayouts` attach further worktrees whose contents the caller
+  /// provisions into the returned runtime.
+  private func makeHibernationHarness(
+    startSessions: Bool = true,
+    additionalLayouts: [LayoutFeature.State] = []
+  ) -> HibernationHarness {
     let worktreeID = Worktree.ID("/tmp/hib")
     let paneID = PaneID()
     let selectedTab = TabID()
@@ -125,7 +130,9 @@ struct TerminalsFeatureTests {
     let clock = TestClock()
     let pressure = AsyncStream<Void>.makeStream()
     let store = TestStore(
-      initialState: TerminalsFeature.State(layouts: [LayoutFeature.State(id: worktreeID, layout: layout)])
+      initialState: TerminalsFeature.State(
+        layouts: [LayoutFeature.State(id: worktreeID, layout: layout)] + additionalLayouts
+      )
     ) {
       TerminalsFeature()
     } withDependencies: {
@@ -417,6 +424,44 @@ struct TerminalsFeatureTests {
     await store.send(.hibernationPolicyChanged) {
       $0.hibernationArmedTabs = []
     }
+  }
+
+  @Test(.dependencies) func aTabActionReDiffsOnlyItsOwnWorktree() async {
+    @Shared(.settingsFile) var settingsFile
+    $settingsFile.withLock { $0.global.terminalHibernationEnabled = true }
+    let otherID = Worktree.ID("/tmp/other")
+    let otherPane = PaneID()
+    let otherTab = TabID()
+    let otherContent = HibernatableContent(id: ContentID())
+    let harness = makeHibernationHarness(
+      additionalLayouts: [
+        LayoutFeature.State(
+          id: otherID,
+          layout: Self.layout(paneID: otherPane, tabID: otherTab, contentID: otherContent.id)
+        )
+      ]
+    )
+    _ = harness.runtime.provision(otherContent, at: .fallback)
+    harness.store.exhaustivity = .off
+
+    // Selecting the first worktree hides its stacked tab and the whole other
+    // worktree (not recent yet), so both arm.
+    await harness.store.send(.selectedWorktreeChanged(harness.worktreeID))
+    #expect(harness.store.state.hibernationArmedTabs == [harness.hiddenTab, otherTab])
+
+    // A tab flip inside the first worktree re-diffs that worktree only: its
+    // own timers swap, the other worktree's armed timer is left untouched.
+    await harness.store.send(
+      .layouts(.element(id: harness.worktreeID, action: .selectTab(id: harness.hiddenTab)))
+    )
+    #expect(harness.store.state.hibernationArmedTabs == [harness.selectedTab, otherTab])
+
+    // Both surviving timers fire: the other worktree's was never cancelled.
+    await harness.clock.advance(by: TerminalsFeature.hibernationGraceWindow)
+    await harness.store.finish()
+    #expect(harness.hiddenContent.renderer != nil)
+    #expect(harness.selectedContent.renderer == nil)
+    #expect(otherContent.renderer == nil)
   }
 
   @Test(.dependencies) func detachLayoutCancelsArmedGraceTimers() async {

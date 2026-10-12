@@ -22,6 +22,7 @@ private enum CancelID {
   static let worktreePromptValidation = "repositories.worktreePromptValidation"
   static let resolveRemoteRepositories = "repositories.resolveRemoteRepositories"
   static let resolveOpenActions = "repositories.resolveOpenActions"
+  static let coalescedCacheRecompute = "repositories.coalescedCacheRecompute"
   static func delayedPRRefresh(_ worktreeID: Worktree.ID) -> String {
     "repositories.delayedPRRefresh.\(worktreeID)"
   }
@@ -268,6 +269,11 @@ struct RepositoriesFeature {
     /// in the recompute helper keeps a no-op rebuild from invalidating
     /// SwiftUI when the user-visible layout didn't actually change.
     var sidebarStructure: SidebarStructure = .placeholder
+    /// Structure-level invalidations raised by per-leaf ticks (agent snapshots,
+    /// terminal projections, line-change loads) and parked until the
+    /// coalescing window flushes them in one rebuild. Non-empty means a flush
+    /// is already scheduled; see `Self.structureCoalesceWindow`.
+    var pendingCoalescedInvalidations: CacheInvalidations = []
     /// Cached projection of the focused row's display fields. The detail body
     /// reads this directly instead of `sidebarItems[id: id]` so per-leaf agent
     /// / notification mutations on the focused row don't invalidate the
@@ -582,6 +588,9 @@ struct RepositoriesFeature {
     /// The resolution effect's result, merged into the map. The only writer of
     /// `openActionByRepositoryID`.
     case openActionsResolved([Repository.ID: OpenWorktreeAction])
+    /// The coalescing window elapsed: rebuild the structure caches the parked
+    /// per-leaf ticks invalidated, once, instead of once per tick.
+    case flushCoalescedCacheRecomputes
     case setMergedWorktreeAction(MergedWorktreeAction)
     case setAutoDeleteArchivedWorktreesAfterDays(AutoDeletePeriod?)
     case autoDeleteExpiredArchivedWorktrees
@@ -689,6 +698,11 @@ struct RepositoriesFeature {
   @Dependency(\.date.now) private var now
   @Dependency(\.uuid) private var uuid
   @Dependency(URLOpenerClient.self) private var urlOpener
+
+  /// How long per-leaf tick invalidations are parked before one structure
+  /// rebuild flushes them. Short enough that Active-section reordering reads
+  /// as immediate, long enough to fold a burst across every worktree into one.
+  static let structureCoalesceWindow: Duration = .milliseconds(100)
 
   /// Host-aware git client: the SSH flavor for a remote worktree (so branch /
   /// diff lookups run on the host), the injected local client otherwise.
@@ -4817,6 +4831,10 @@ struct RepositoriesFeature {
       case .sidebarItems:
         return .none
 
+      case .flushCoalescedCacheRecomputes:
+        // Handled by the post-reduce cache hook below.
+        return .none
+
       case .fileExplorer:
         return .none
       }
@@ -4868,14 +4886,44 @@ struct RepositoriesFeature {
     //
     // The open-action bits launch an effect rather than a recompute: the map is
     // read off disk, so `applyCacheRecomputes` must stay pure.
+    //
+    // Per-leaf ticks (agent snapshots, terminal projections, line-change loads)
+    // arrive once per worktree per change, and each would otherwise pay a full
+    // O(repositories × worktrees) structure + menu-bar rebuild on the main
+    // actor. Their structure-level bits are parked in
+    // `pendingCoalescedInvalidations` and flushed once per
+    // `structureCoalesceWindow`, so N worktrees storming cost one rebuild per
+    // window, not N. Everything else (selection, user-driven edits) still
+    // recomputes synchronously so the UI never lags a click.
     Reduce { state, action in
       @Dependency(\.sidebarStructureAutoRecompute) var autoRecompute
       guard autoRecompute else { return .none }
-      let invalidations = action.cacheInvalidations
+      if case .flushCoalescedCacheRecomputes = action {
+        let pending = state.pendingCoalescedInvalidations
+        state.pendingCoalescedInvalidations = []
+        state.applyCacheRecomputes(pending)
+        return .none
+      }
+      var invalidations = action.cacheInvalidations
+      var scheduleFlush: Effect<Action> = .none
+      if action.coalescesStructureRecompute {
+        let deferred = invalidations.intersection(.coalescable)
+        if !deferred.isEmpty {
+          invalidations.subtract(deferred)
+          if state.pendingCoalescedInvalidations.isEmpty {
+            scheduleFlush = .run { send in
+              try await clock.sleep(for: Self.structureCoalesceWindow)
+              await send(.flushCoalescedCacheRecomputes)
+            }
+            .cancellable(id: CancelID.coalescedCacheRecompute)
+          }
+          state.pendingCoalescedInvalidations.formUnion(deferred)
+        }
+      }
       state.applyCacheRecomputes(invalidations)
-      guard invalidations.contains(.openActionResolution) else { return .none }
+      guard invalidations.contains(.openActionResolution) else { return scheduleFlush }
       state.seedUnresolvedOpenActions()
-      return Self.resolveOpenActionsEffect(state: state)
+      return .merge(scheduleFlush, Self.resolveOpenActionsEffect(state: state))
     }
     // Post-reduce reconcile: derive the file explorer's context (selected
     // worktree + pane visibility) after every action and forward it only on

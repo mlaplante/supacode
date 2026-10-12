@@ -20,13 +20,27 @@ struct SelectedWorktreeSliceCacheTests {
     let sliceBefore = state.selectedWorktreeSlice
     #expect(sliceBefore != nil, "Cache must be populated for the focused row")
 
-    let store = TestStore(initialState: state) { RepositoriesFeature() }
+    let clock = TestClock()
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+    }
 
     // Agent storm: only mutates `agentSnapshot`. Slice excludes it, so the
-    // post-reduce diff must not invalidate the cache.
+    // post-reduce diff must not invalidate the cache. The structure rebuild
+    // it does raise is parked for the coalescing window.
     await store.send(
       .sidebarItems(.element(id: worktree.id, action: .agentSnapshotChanged(.init())))
-    )
+    ) {
+      $0.pendingCoalescedInvalidations = .sidebarStructure
+    }
+    #expect(store.state.selectedWorktreeSlice == sliceBefore)
+    await clock.advance(by: RepositoriesFeature.structureCoalesceWindow)
+    await store.receive(\.flushCoalescedCacheRecomputes) {
+      $0.pendingCoalescedInvalidations = []
+      $0.applyPostReduceCacheRecomputes(.sidebarStructure)
+    }
     #expect(store.state.selectedWorktreeSlice == sliceBefore)
   }
 
@@ -38,7 +52,12 @@ struct SelectedWorktreeSliceCacheTests {
     state.reconcileSidebarForTesting()
     let sliceBefore = state.selectedWorktreeSlice
 
-    let store = TestStore(initialState: state) { RepositoriesFeature() }
+    let clock = TestClock()
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+    }
     let surfaceID = UUID()
     await store.send(
       .sidebarItems(
@@ -58,11 +77,19 @@ struct SelectedWorktreeSliceCacheTests {
     ) {
       $0.sidebarItems[id: worktree.id]?.hasTerminalProjection = true
       $0.sidebarItems[id: worktree.id]?.surfaceIDs = [surfaceID]
-      $0.applyPostReduceCacheRecomputes()
+      $0.pendingCoalescedInvalidations = .coalescable
+      $0.applyCacheRecomputes(.selectedWorktreeSlice)
     }
 
-    // The slice recompute runs (projections can carry `runningScripts`), but a
-    // surfaces-only change must diff to the same slice value.
+    // The slice recompute runs synchronously (projections can carry
+    // `runningScripts`), but a surfaces-only change must diff to the same
+    // slice value. The whole-roster caches wait for the coalescing window.
+    #expect(store.state.selectedWorktreeSlice == sliceBefore)
+    await clock.advance(by: RepositoriesFeature.structureCoalesceWindow)
+    await store.receive(\.flushCoalescedCacheRecomputes) {
+      $0.pendingCoalescedInvalidations = []
+      $0.applyPostReduceCacheRecomputes(.coalescable)
+    }
     #expect(store.state.selectedWorktreeSlice == sliceBefore)
   }
 
@@ -74,10 +101,22 @@ struct SelectedWorktreeSliceCacheTests {
     state.reconcileSidebarForTesting()
     let cacheBefore = state.toolbarNotificationGroupsCache
 
-    let store = TestStore(initialState: state) { RepositoriesFeature() }
+    let clock = TestClock()
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+    }
     await store.send(
       .sidebarItems(.element(id: worktree.id, action: .agentSnapshotChanged(.init())))
-    )
+    ) {
+      $0.pendingCoalescedInvalidations = .sidebarStructure
+    }
+    await clock.advance(by: RepositoriesFeature.structureCoalesceWindow)
+    await store.receive(\.flushCoalescedCacheRecomputes) {
+      $0.pendingCoalescedInvalidations = []
+      $0.applyPostReduceCacheRecomputes(.sidebarStructure)
+    }
 
     #expect(store.state.toolbarNotificationGroupsCache == cacheBefore)
   }
@@ -89,7 +128,12 @@ struct SelectedWorktreeSliceCacheTests {
     state.selection = .worktree(worktree.id)
     state.reconcileSidebarForTesting()
     let scriptID = UUID()
-    let store = TestStore(initialState: state) { RepositoriesFeature() }
+    let clock = TestClock()
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+    }
 
     await store.send(
       .sidebarItems(
@@ -109,13 +153,19 @@ struct SelectedWorktreeSliceCacheTests {
     ) {
       $0.sidebarItems[id: worktree.id]?.hasTerminalProjection = true
       $0.sidebarItems[id: worktree.id]?.runningScripts = [.init(id: scriptID, tint: .blue)]
-      $0.applyPostReduceCacheRecomputes()
+      $0.pendingCoalescedInvalidations = .coalescable
+      $0.applyCacheRecomputes(.selectedWorktreeSlice)
     }
 
-    // Verify the cache picked up the new running script (sanity that the
-    // recompute path actually fires for this action). This is the toolbar
-    // dropdown's Run/Stop signal (#573).
+    // Verify the cache picked up the new running script synchronously, before
+    // the coalescing window: this is the toolbar dropdown's Run/Stop signal
+    // (#573) and must not lag the tick.
     #expect(store.state.selectedWorktreeSlice?.runningScripts.contains(where: { $0.id == scriptID }) == true)
+    await clock.advance(by: RepositoriesFeature.structureCoalesceWindow)
+    await store.receive(\.flushCoalescedCacheRecomputes) {
+      $0.pendingCoalescedInvalidations = []
+      $0.applyPostReduceCacheRecomputes(.coalescable)
+    }
   }
 
   @Test func pullRequestChangeRefreshesNotificationGlyphCache() async {
