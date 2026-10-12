@@ -561,6 +561,8 @@ struct RepositoriesFeature {
     case repositoriesRemoved([Repository.ID], selectionWasRemoved: Bool)
     case pinWorktree(Worktree.ID)
     case unpinWorktree(Worktree.ID)
+    /// The worktree was used (agent activity on one of its surfaces); stamps `lastFocusedAt`.
+    case worktreeTouched(Worktree.ID)
     case presentAlert(title: String, message: String)
     case worktreeInfoEvent(WorktreeInfoWatcherClient.Event)
     case worktreeBranchNameLoaded(worktreeID: Worktree.ID, name: String)
@@ -4166,6 +4168,7 @@ struct RepositoriesFeature {
       case .selectWorktree(let rawWorktreeID, let focusTerminal):
         let worktreeID = rawWorktreeID.map { state.resolvedWorktreeID(for: $0) }
         state.setSingleWorktreeSelection(worktreeID)
+        if let worktreeID { state.touchWorktree(worktreeID, at: now) }
         let selectedWorktree = state.worktree(for: worktreeID)
         var effects: [Effect<Action>] = [
           .send(.delegate(.selectedWorktreeChanged(selectedWorktree)))
@@ -4176,6 +4179,10 @@ struct RepositoriesFeature {
           )
         }
         return .merge(effects)
+
+      case .worktreeTouched(let worktreeID):
+        state.touchWorktree(worktreeID, at: now)
+        return .none
 
       case .selectWorktreeAtHotkeySlot(let index):
         // Snapshot-driven menu items capture only the slot index, so the
@@ -6188,6 +6195,16 @@ extension RepositoriesFeature.State {
 
   func repositoryID(for worktreeID: Worktree.ID?) -> Repository.ID? {
     selectedRow(for: worktreeID)?.repositoryID
+  }
+
+  /// Stamp `lastFocusedAt` for `worktreeID` through the shared sidebar.
+  /// `date` is an autoclosure so the clock is read only when a sidebar row exists to stamp.
+  mutating func touchWorktree(_ worktreeID: Worktree.ID, at date: @autoclosure () -> Date) {
+    guard let repositoryID = repositoryID(containing: worktreeID),
+      sidebar.currentBucket(of: worktreeID, in: repositoryID) != nil
+    else { return }
+    let stamp = date()
+    $sidebar.withLock { $0.touch(worktree: worktreeID, in: repositoryID, at: stamp) }
   }
 
   func repositoryID(containing worktreeID: Worktree.ID) -> Repository.ID? {

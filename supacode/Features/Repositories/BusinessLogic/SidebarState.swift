@@ -203,17 +203,27 @@ nonisolated struct SidebarState: Equatable, Sendable, Codable {
     /// Optional user-supplied tint applied to the sidebar row title.
     /// `nil` means "default styling".
     var color: RepositoryColor?
+    /// When the worktree was last used (selected, or one of its surfaces
+    /// reported agent activity). `nil` means never recorded.
+    var lastFocusedAt: Date?
 
     private enum CodingKeys: String, CodingKey {
       case archivedAt
       case title
       case color
+      case lastFocusedAt
     }
 
-    init(archivedAt: Date? = nil, title: String? = nil, color: RepositoryColor? = nil) {
+    init(
+      archivedAt: Date? = nil,
+      title: String? = nil,
+      color: RepositoryColor? = nil,
+      lastFocusedAt: Date? = nil
+    ) {
       self.archivedAt = archivedAt
       self.title = title
       self.color = color
+      self.lastFocusedAt = lastFocusedAt
     }
 
     init(from decoder: any Decoder) throws {
@@ -224,6 +234,7 @@ nonisolated struct SidebarState: Equatable, Sendable, Codable {
       // that doesn't understand `.custom`, hand-edit, etc.) drops just
       // this field rather than killing the row's entire entry.
       self.color = (try? container.decodeIfPresent(RepositoryColor.self, forKey: .color)) ?? nil
+      self.lastFocusedAt = try? container.decodeIfPresent(Date.self, forKey: .lastFocusedAt)
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -233,6 +244,7 @@ nonisolated struct SidebarState: Equatable, Sendable, Codable {
       // stays clean for worktrees the user never touched.
       try container.encodeIfPresent(title, forKey: .title)
       try container.encodeIfPresent(color, forKey: .color)
+      try container.encodeIfPresent(lastFocusedAt, forKey: .lastFocusedAt)
     }
   }
 
@@ -291,6 +303,16 @@ nonisolated extension SidebarState {
     }
     for (bucketID, bucket) in section.buckets where bucket.items[worktreeID] != nil {
       return bucketID
+    }
+    return nil
+  }
+
+  /// When `worktreeID` was last used, from whichever bucket holds it.
+  func lastFocusedAt(for worktreeID: Worktree.ID) -> Date? {
+    for section in sections.values {
+      for bucket in section.buckets.values {
+        if let item = bucket.items[worktreeID] { return item.lastFocusedAt }
+      }
     }
     return nil
   }
@@ -399,6 +421,18 @@ nonisolated extension SidebarState {
       ) ?? .init()
     carried.archivedAt = nil
     insert(worktree: worktreeID, in: repositoryID, bucket: .pinned, item: carried, position: 0)
+  }
+
+  /// Stamp the worktree as used at `date`. Looks in every bucket so an
+  /// archived row that receives a late hook event still records it.
+  mutating func touch(worktree worktreeID: Worktree.ID, in repositoryID: Repository.ID, at date: Date) {
+    guard var section = sections[repositoryID] else { return }
+    for (bucketID, var bucket) in section.buckets where bucket.items[worktreeID] != nil {
+      bucket.items[worktreeID]?.lastFocusedAt = date
+      section.buckets[bucketID] = bucket
+      sections[repositoryID] = section
+      return
+    }
   }
 
   /// Unpin `worktreeID`: the mirror of `pin`, collapsing into a single

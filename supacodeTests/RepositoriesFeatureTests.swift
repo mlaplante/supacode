@@ -9466,6 +9466,39 @@ struct RepositoriesFeatureTests {
     #expect(store.state.inFlightPullRequestOpenFetchWorktreeIDs.isEmpty)
   }
 
+  private func makeLastFocusedStore(now: Date) -> (TestStoreOf<RepositoriesFeature>, Worktree) {
+    let repoRoot = "/tmp/repo"
+    let worktree = makeWorktree(id: "/tmp/repo/wt", name: "wt", repoRoot: repoRoot)
+    let repository = makeRepository(id: repoRoot, worktrees: [worktree])
+    var state = makeState(repositories: [repository])
+    state.$sidebar.withLock { sidebar in
+      sidebar.sections[repository.id] = .init(
+        buckets: [.unpinned: .init(items: [worktree.id: .init()])]
+      )
+    }
+    state.reconcileSidebarForTesting()
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    }
+    store.dependencies.date = .constant(now)
+    store.exhaustivity = .off
+    return (store, worktree)
+  }
+
+  @Test func selectingWorktreeStampsLastFocusedAt() async {
+    let now = Date(timeIntervalSince1970: 4_000)
+    let (store, worktree) = makeLastFocusedStore(now: now)
+    await store.send(.selectWorktree(worktree.id, focusTerminal: false))
+    #expect(store.state.sidebar.lastFocusedAt(for: worktree.id) == now)
+  }
+
+  @Test func worktreeTouchedStampsLastFocusedAt() async {
+    let now = Date(timeIntervalSince1970: 5_000)
+    let (store, worktree) = makeLastFocusedStore(now: now)
+    await store.send(.worktreeTouched(worktree.id))
+    #expect(store.state.sidebar.lastFocusedAt(for: worktree.id) == now)
+  }
+
   private func makeWorktree(
     id: String,
     name: String,

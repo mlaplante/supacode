@@ -68,6 +68,13 @@ public struct WorktreeSettingsView: View {
             Text(period.label).tag(AutoDeletePeriod?.some(period))
           }
         }
+        Stepper(value: $store.staleWorktreeAfterDays, in: 0...90) {
+          LabeledContent("Mark worktrees stale after") {
+            Text(store.staleWorktreeAfterDays == 0 ? "Never" : "\(store.staleWorktreeAfterDays) days")
+              .monospacedDigit()
+          }
+        }
+        .help("Worktrees not opened for this many days appear in Review Stale Worktrees. 0 turns the idle rule off.")
       }
       Section {
         Toggle(isOn: $store.deleteBranchOnDeleteWorktree) {
