@@ -12496,6 +12496,72 @@ struct RepositoriesFeatureTests {
     #expect(store.state.isShowingStaleWorktrees)
   }
 
+  private func makeEmptyClassifiedStore(
+    fileStatus: GitStatusSnapshot = .empty
+  ) async -> (TestStoreOf<RepositoriesFeature>, Worktree) {
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.fileStatus = { _ in .empty }
+      $0.gitClient.lineChanges = { _ in (added: 0, removed: 0) }
+    }
+    await store.send(
+      .worktreeAheadBehindLoaded(
+        worktreeID: worktree.id, result: GitAheadBehind(ahead: 0, behind: 0), base: "origin/main"))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.sidebarItems[id: worktree.id]?.staleReason == .empty)
+    return (store, worktree)
+  }
+
+  @Test func filesChangedReprobesTreeAndUnstalesDirtyRow() async {
+    let (store, worktree) = await makeEmptyClassifiedStore()
+    store.dependencies.gitClient.fileStatus = { _ in
+      GitStatusSnapshot(statuses: ["a.txt": GitFileStatus(isUntracked: true)])
+    }
+    await store.send(.worktreeInfoEvent(.filesChanged(worktreeID: worktree.id)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.sidebarItems[id: worktree.id]?.isTreeClean == false)
+    #expect(store.state.sidebarItems[id: worktree.id]?.staleReason == nil)
+  }
+
+  @Test func nonzeroLineChangesProveTreeDirtyWithoutGitStatus() async {
+    let (store, worktree) = await makeEmptyClassifiedStore()
+    store.dependencies.gitClient.fileStatus = { _ in
+      Issue.record("fileStatus must not be called for the line-changes shortcut")
+      return .empty
+    }
+    await store.send(.worktreeLineChangesLoaded(worktreeID: worktree.id, added: 3, removed: 1))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.sidebarItems[id: worktree.id]?.isTreeClean == false)
+    #expect(store.state.sidebarItems[id: worktree.id]?.staleReason == nil)
+  }
+
+  @Test func pullRequestLandingOnStaleRowReclassifies() async {
+    let (store, worktree) = await makeEmptyClassifiedStore()
+    let repositoryID = store.state.repositories[0].id
+    await store.send(
+      .repositoryPullRequestsLoaded(
+        repositoryID: repositoryID,
+        pullRequestsByWorktreeID: [worktree.id: nil]
+      ))
+    await store.receive(\.reclassifyStale)
+    await store.finish()
+  }
+
+  @Test func idleWorktreeIsClassifiedThroughReclassify() async {
+    let now = Date(timeIntervalSince1970: 10_000_000)
+    let (store, worktree) = makeLastFocusedStore(now: now)
+    let repositoryID = store.state.repositories[0].id
+    store.state.$sidebar.withLock {
+      _ = $0.touch(worktree: worktree.id, in: repositoryID, at: now.addingTimeInterval(-30 * 86_400))
+    }
+    await store.send(.reclassifyStale(worktreeID: worktree.id))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.sidebarItems[id: worktree.id]?.staleReason == .idle(days: 30))
+  }
+
   // MARK: - Branch sync.
 
   private func makeSyncStore(

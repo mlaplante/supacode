@@ -37,6 +37,26 @@ struct SidebarItemFeatureTests {
     }
   }
 
+  @Test func staleReasonChangeIsEqualityGuarded() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.staleReasonChanged(.empty)) { $0.staleReason = .empty }
+    await store.send(.staleReasonChanged(.empty))
+    await store.send(.staleReasonChanged(.idle(days: 9))) { $0.staleReason = .idle(days: 9) }
+    await store.send(.staleReasonChanged(nil)) { $0.staleReason = nil }
+  }
+
+  @Test func treeCleanChangeIsEqualityGuarded() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.treeCleanChanged(true)) { $0.isTreeClean = true }
+    await store.send(.treeCleanChanged(true))
+    await store.send(.treeCleanChanged(false)) { $0.isTreeClean = false }
+    await store.send(.treeCleanChanged(nil)) { $0.isTreeClean = nil }
+  }
+
   @Test func syncStateChangeIsEqualityGuarded() async {
     let store = TestStore(initialState: makeState(name: "feature")) {
       SidebarItemFeature()

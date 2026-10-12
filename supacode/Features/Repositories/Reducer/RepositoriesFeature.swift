@@ -1109,7 +1109,11 @@ struct RepositoriesFeature {
           Self.syncSidebar(&state)
         }
         let repositories = state.repositories
-        return .send(.delegate(.repositoriesChanged(repositories)))
+        // Archived rows are never stale; recompute now that it is live again.
+        return .concatenate(
+          .send(.delegate(.repositoriesChanged(repositories))),
+          .send(.reclassifyStale(worktreeID: worktreeID))
+        )
 
       case .requestDeleteSidebarItems(let targets):
         // Kind discriminator: folders skip the main-worktree guard
@@ -3677,8 +3681,21 @@ struct RepositoriesFeature {
             }
           }
           .cancellable(id: CancelID.worktreeLineChanges(worktreeID), cancelInFlight: true)
+          // Edits after the first probe must keep `isTreeClean` honest for rows that are (or could
+          // be) classified `empty`; otherwise the review view would offer to discard dirty work.
+          let row = state.sidebarItems[id: worktreeID]
+          let needsTreeProbe = row?.staleReason != nil || row?.isTreeClean == true
+          let treeProbe: Effect<Action> =
+            needsTreeProbe
+            ? .run { send in
+              let status = await gitClient.fileStatus(worktreeURL)
+              await send(.worktreeTreeCleanLoaded(worktreeID: worktreeID, isClean: status?.isClean))
+            }
+            .cancellable(id: CancelID.worktreeTreeClean(worktreeID), cancelInFlight: true)
+            : .none
           return .merge(
             lineChanges,
+            treeProbe,
             needsAheadBehind ? .send(.refreshAheadBehind(worktreeID: worktreeID)) : .none
           )
         case .repositoryPullRequestRefresh(let repositoryRootURL, let worktreeIDs, let trigger):
@@ -6885,11 +6902,18 @@ extension RepositoriesFeature.State {
     guard let row = sidebarItems[id: worktreeID] else { return .none }
     let nextAdded: Int? = added == 0 && removed == 0 ? nil : added
     let nextRemoved: Int? = added == 0 && removed == 0 ? nil : removed
-    guard row.addedLines != nextAdded || row.removedLines != nextRemoved else { return .none }
-    return .send(
+    // A nonzero diff proves the tree is dirty; no git call needed to un-stale the row.
+    let provesDirty = nextAdded != nil && row.isTreeClean == true
+    guard row.addedLines != nextAdded || row.removedLines != nextRemoved || provesDirty else { return .none }
+    let diffEffect: Effect<RepositoriesFeature.Action> = .send(
       .sidebarItems(
         .element(id: worktreeID, action: .diffStatsChanged(added: nextAdded, removed: nextRemoved))
       )
+    )
+    guard provesDirty else { return diffEffect }
+    return .concatenate(
+      diffEffect,
+      .send(.worktreeTreeCleanLoaded(worktreeID: worktreeID, isClean: false))
     )
   }
 
