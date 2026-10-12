@@ -140,7 +140,11 @@ struct SupacodeApp: App {
     // sidebar / layouts into UserDefaults. Never throws; the underlying data is
     // always preserved in place, so a partial failure only defers cleanup and is
     // surfaced to the user below.
-    let relocationOutcome = SettingsRelocationMigrator.run()
+    // Fork: skip when hosting unit tests. The test host shares the real home
+    // directory, so running the relocation there retires the user's legacy files
+    // while seeding only the tests' in-memory stores.
+    let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    let relocationOutcome = isTestHost ? .noLegacyData : SettingsRelocationMigrator.run()
     @Shared(.settingsFile) var settingsFile
     let initialSettings = settingsFile.global
     let infoDictionary = Bundle.main.infoDictionary ?? [:]
