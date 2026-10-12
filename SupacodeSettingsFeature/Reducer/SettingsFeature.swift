@@ -99,6 +99,10 @@ public struct SettingsFeature {
     /// Per-install row state, keyed by target (agent + location) so two installs
     /// of one agent into different folders never share a row.
     public var agentIntegrationStates: [AgentInstallTarget: AgentIntegrationRowState] = [:]
+    /// Last hook event received per agent this session, mirrored from presence.
+    public var lastHookEventAt: [SkillAgent: Date] = [:]
+    /// Last test-event failure per agent, cleared on the next attempt.
+    public var hookTestFailures: [SkillAgent: String] = [:]
     /// Targets auto-updated this session, recorded directly so no intermediate
     /// row state can make the once-per-session guard forget. Keyed by target so a
     /// custom folder's heal never consumes the default's. A manual tap never reads it.
@@ -253,6 +257,12 @@ public struct SettingsFeature {
     case cliUninstallTapped
     case cliInstallCompleted(Result<Bool, Error>)
     case refreshAgentIntegrationStates
+    case refreshHookActivity
+    case startHookActivityPolling
+    case stopHookActivityPolling
+    case hookActivityLoaded([SkillAgent: Date])
+    case agentSendTestEventTapped(SkillAgent)
+    case hookTestEventFailed(SkillAgent, reason: String)
     case agentIntegrationChecked(AgentInstallTarget, Result<AgentIntegrationState, Error>)
     case agentIntegrationInstallTapped(AgentInstallTarget)
     case agentIntegrationUninstallTapped(AgentInstallTarget)
@@ -289,6 +299,8 @@ public struct SettingsFeature {
   @CasePathable
   public enum Delegate: Equatable {
     case settingsChanged(GlobalSettings)
+    /// Ask the app to run the agent's hook in a terminal tab.
+    case sendHookTestEvent(SkillAgent)
   }
 
   @Dependency(AnalyticsClient.self) private var analyticsClient
@@ -299,6 +311,12 @@ public struct SettingsFeature {
   @Dependency(SystemNotificationClient.self) private var systemNotificationClient
   @Dependency(NotificationSoundClient.self) private var notificationSoundClient
   @Dependency(\.date.now) private var now
+  @Dependency(\.continuousClock) private var clock
+  @Dependency(AgentHookActivityClient.self) private var agentHookActivityClient
+
+  nonisolated private static let hookActivityPollInterval = Duration.seconds(5)
+  nonisolated private static let hookTestPollInterval = Duration.seconds(2)
+  nonisolated private static let hookTestTimeout = Duration.seconds(15)
 
   public init() {}
 
@@ -315,9 +333,61 @@ public struct SettingsFeature {
               let installed = await cliInstallerClient.checkInstalled()
               await send(.cliInstallChecked(installed: installed))
             },
-            .send(.refreshAgentIntegrationStates)
+            .send(.refreshAgentIntegrationStates),
+            .send(.refreshHookActivity)
           )
         )
+
+      case .refreshHookActivity:
+        return .run { [agentHookActivityClient] send in
+          await send(.hookActivityLoaded(await agentHookActivityClient.lastEventDates()))
+        }
+
+      case .hookActivityLoaded(let dates):
+        state.lastHookEventAt = dates
+        return .none
+
+      case .startHookActivityPolling:
+        return .run { [agentHookActivityClient, clock] send in
+          while !Task.isCancelled {
+            await send(.hookActivityLoaded(await agentHookActivityClient.lastEventDates()))
+            try await clock.sleep(for: Self.hookActivityPollInterval)
+          }
+        }
+        .cancellable(id: HookActivityPollCancelID(), cancelInFlight: true)
+
+      case .stopHookActivityPolling:
+        return .cancel(id: HookActivityPollCancelID())
+
+      case .agentSendTestEventTapped(let agent):
+        state.hookTestFailures[agent] = nil
+        let tappedAt = now
+        let configPath = AgentInstallTarget.standard(agent).configDirectory().path(percentEncoded: false)
+        return .merge(
+          .send(.delegate(.sendHookTestEvent(agent))),
+          .run { [agentHookActivityClient, clock] send in
+            var elapsed = Duration.zero
+            while elapsed < Self.hookTestTimeout {
+              let step = min(Self.hookTestPollInterval, Self.hookTestTimeout - elapsed)
+              try await clock.sleep(for: step)
+              elapsed += step
+              let dates = await agentHookActivityClient.lastEventDates()
+              await send(.hookActivityLoaded(dates))
+              if let latest = dates[agent], latest > tappedAt { return }
+            }
+            await send(
+              .hookTestEventFailed(
+                agent,
+                reason: "No event received; check that \(configPath) contains the managed hooks."
+              )
+            )
+          }
+          .cancellable(id: HookTestCancelID(agent: agent), cancelInFlight: true)
+        )
+
+      case .hookTestEventFailed(let agent, let reason):
+        state.hookTestFailures[agent] = reason
+        return .none
 
       case .refreshAgentIntegrationStates:
         // Cancellable so a stacked scene activation can't run two task
@@ -1126,6 +1196,14 @@ public struct SettingsFeature {
 /// target so two folders of one agent never cancel each other.
 private nonisolated struct AgentIntegrationCancelID: Hashable, Sendable {
   let target: AgentInstallTarget
+}
+
+/// Cancellation key for the periodic hook-activity refresh while Developer settings is visible.
+private nonisolated struct HookActivityPollCancelID: Hashable, Sendable {}
+
+/// Cancellation key for one agent's test-event wait.
+private nonisolated struct HookTestCancelID: Hashable, Sendable {
+  let agent: SkillAgent
 }
 
 /// Cancellation key for the agent-state refresh effect so stacked scene
