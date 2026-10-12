@@ -91,6 +91,8 @@ enum SidebarHighlightOrdering {
     let branchName: String
     let isNotified: Bool
     let classification: SidebarActiveClassification?
+    /// When the row's agent started waiting on the user; nil when nothing is parked.
+    let attentionSince: Date?
   }
 
   static func orderedRowIDs(
@@ -105,7 +107,13 @@ enum SidebarHighlightOrdering {
         if prioritizeNotified, lhs.isNotified != rhs.isNotified {
           return lhs.isNotified
         }
-        return branchNameOrdersBefore(lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
+        // Rows parked on the user lead, longest wait first.
+        switch (lhs.attentionSince, rhs.attentionSince) {
+        case (let left?, let right?) where left != right: return left < right
+        case (.some, .none): return true
+        case (.none, .some): return false
+        default: return branchNameOrdersBefore(lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
+        }
       }
       .map(\.id)
   }
@@ -807,6 +815,26 @@ extension RepositoriesFeature.State {
     computeHighlightHoists(groupPinned: true, groupActive: true)
   }
 
+  /// Rows with an agent parked on the user, longest wait first. Archived,
+  /// missing and terminating rows are excluded. Feeds the menu bar's Needs You
+  /// section and `jumpToNextAwaiting`.
+  func needsYouRowIDs() -> [Worktree.ID] {
+    let archived = archivedWorktreeIDSet
+    return sidebarItems
+      .filter { row in
+        !archived.contains(row.id) && !row.isMissing && !row.lifecycle.isTerminating
+          && row.agents.contains(where: { $0.activity.isAttention })
+      }
+      .sorted { lhs, rhs in
+        let left = lhs.agentSnapshot.since ?? .distantFuture
+        let right = rhs.agentSnapshot.since ?? .distantFuture
+        if left != right { return left < right }
+        return SidebarHighlightOrdering.branchNameOrdersBefore(
+          lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
+      }
+      .map(\.id)
+  }
+
   /// Hoisted-row payload for one highlight-hoist pass (the sidebar structure
   /// pass, or the menu bar's forced-on pass).
   struct HighlightHoists {
@@ -1116,7 +1144,8 @@ extension RepositoriesFeature.State {
           id: id,
           branchName: state.branchName,
           isNotified: state.hasUnseenNotifications,
-          classification: SidebarActiveClassification.classify(state)
+          classification: SidebarActiveClassification.classify(state),
+          attentionSince: state.agents.contains(where: { $0.activity.isAttention }) ? state.agentSnapshot.since : nil
         )
       )
     }

@@ -323,6 +323,54 @@ struct MenuBarNotificationListTests {
     #expect(state.computeMenuBarSections().unread.isEmpty)
   }
 
+  @Test func needsYouListsAttentionRowsLongestWaitFirst() {
+    let rowA = makeWorktree(id: "/tmp/repo/wt-a", name: "wt-a")
+    let rowB = makeWorktree(id: "/tmp/repo/wt-b", name: "wt-b")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [rowA, rowB])]
+    )
+    let late = Date(timeIntervalSince1970: 900)
+    let early = Date(timeIntervalSince1970: 100)
+    state.sidebarItems[id: rowA.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .awaitingInput, since: late)],
+      isWorking: false, hasError: false, since: late)
+    state.sidebarItems[id: rowB.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .codex, activity: .error, since: early)],
+      isWorking: false, hasError: true, since: early)
+    state.reconcileSidebarForTesting()
+
+    let sections = state.computeMenuBarSections()
+
+    #expect(sections.needsYou == [rowB.id, rowA.id])
+    #expect(sections.active.isEmpty)
+    #expect(sections.entries.first?.content == .header("Needs You", .active))
+  }
+
+  @Test func needsYouExcludesArchivedAndIdleRows() {
+    let rowA = makeWorktree(id: "/tmp/repo/wt-a", name: "wt-a")
+    let rowB = makeWorktree(id: "/tmp/repo/wt-b", name: "wt-b")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [rowA, rowB])]
+    )
+    state.sidebarItems[id: rowA.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .busy, since: .distantPast)],
+      isWorking: true, hasError: false, since: .distantPast)
+    state.sidebarItems[id: rowB.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
+      isWorking: false, hasError: false, since: .distantPast)
+    state.$sidebar.withLock { sidebar in
+      sidebar.insert(
+        worktree: rowB.id,
+        in: Repository.ID("/tmp/repo/"),
+        bucket: .archived,
+        item: .init(archivedAt: Date(timeIntervalSince1970: 1_000_000))
+      )
+    }
+    state.reconcileSidebarForTesting()
+
+    #expect(state.computeMenuBarSections().needsYou.isEmpty)
+  }
+
   @Test func postReduceHookRefreshesTheCache() {
     let worktree = makeWorktree(id: "/tmp/repo/wt", name: "wt")
     var state = RepositoriesFeature.State(

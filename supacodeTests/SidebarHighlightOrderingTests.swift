@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import supacode
@@ -8,9 +9,12 @@ struct SidebarHighlightOrderingTests {
     _ id: String,
     branch: String,
     isNotified: Bool = false,
-    classification: SidebarActiveClassification? = nil
+    classification: SidebarActiveClassification? = nil,
+    attentionSince: Date? = nil
   ) -> SidebarHighlightOrdering.Candidate {
-    .init(id: WorktreeID(id), branchName: branch, isNotified: isNotified, classification: classification)
+    .init(
+      id: WorktreeID(id), branchName: branch, isNotified: isNotified, classification: classification,
+      attentionSince: attentionSince)
   }
 
   @Test func activeDropsUnclassifiedRows() {
@@ -157,5 +161,33 @@ struct SidebarHighlightOrderingTests {
       SidebarHighlightOrdering.orderedRowIDs(forPinned: true, prioritizeNotified: false, candidates: []) == [])
     #expect(
       SidebarHighlightOrdering.orderedRowIDs(forPinned: false, prioritizeNotified: true, candidates: []) == [])
+  }
+
+  @Test func attentionRowsLeadOrderedByLongestWait() {
+    let old = Date(timeIntervalSince1970: 100)
+    let new = Date(timeIntervalSince1970: 900)
+    let ids = SidebarHighlightOrdering.orderedRowIDs(
+      forPinned: false,
+      prioritizeNotified: false,
+      candidates: [
+        candidate("a", branch: "a", classification: .agent),
+        candidate("b", branch: "b", classification: .awaiting, attentionSince: new),
+        candidate("c", branch: "c", classification: .awaiting, attentionSince: old),
+      ]
+    )
+    #expect(ids == ["c", "b", "a"])
+  }
+
+  @Test func notifiedStillBeatsAttentionWhenPrioritized() {
+    let ids = SidebarHighlightOrdering.orderedRowIDs(
+      forPinned: false,
+      prioritizeNotified: true,
+      candidates: [
+        candidate("a", branch: "a", isNotified: true, classification: .agent),
+        candidate(
+          "b", branch: "b", classification: .awaiting, attentionSince: Date(timeIntervalSince1970: 100)),
+      ]
+    )
+    #expect(ids == ["a", "b"])
   }
 }
