@@ -91,6 +91,8 @@ enum SidebarHighlightOrdering {
     let branchName: String
     let isNotified: Bool
     let classification: SidebarActiveClassification?
+    /// When the row's agent started waiting on the user; nil when nothing is parked.
+    let attentionSince: Date?
   }
 
   static func orderedRowIDs(
@@ -105,7 +107,13 @@ enum SidebarHighlightOrdering {
         if prioritizeNotified, lhs.isNotified != rhs.isNotified {
           return lhs.isNotified
         }
-        return branchNameOrdersBefore(lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
+        // Rows parked on the user lead, longest wait first.
+        switch (lhs.attentionSince, rhs.attentionSince) {
+        case (let left?, let right?) where left != right: return left < right
+        case (.some, .none): return true
+        case (.none, .some): return false
+        default: return branchNameOrdersBefore(lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
+        }
       }
       .map(\.id)
   }
@@ -818,6 +826,29 @@ extension RepositoriesFeature.State {
     computeHighlightHoists(groupPinned: true, groupActive: true)
   }
 
+  /// Rows with an agent parked on the user, longest wait first. Archived,
+  /// missing and terminating rows are excluded. Feeds the menu bar's Needs You
+  /// section and `jumpToNextAwaiting`.
+  func needsYouRowIDs() -> [Worktree.ID] {
+    needsYouRows()
+      .sorted { lhs, rhs in
+        if lhs.attentionSince != rhs.attentionSince { return lhs.attentionSince < rhs.attentionSince }
+        return SidebarHighlightOrdering.branchNameOrdersBefore(
+          lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
+      }
+      .map(\.id)
+  }
+
+  /// Count-only twin of `needsYouRowIDs()` for hot paths: filters, never sorts.
+  var needsYouCount: Int { needsYouRows().count }
+
+  private func needsYouRows() -> [SidebarItemFeature.State] {
+    let archived = archivedWorktreeIDSet
+    return sidebarItems.filter { row in
+      row.needsAttention && !row.isMissing && !row.lifecycle.isTerminating && !archived.contains(row.id)
+    }
+  }
+
   /// Hoisted-row payload for one highlight-hoist pass (the sidebar structure
   /// pass, or the menu bar's forced-on pass).
   struct HighlightHoists {
@@ -1127,7 +1158,8 @@ extension RepositoriesFeature.State {
           id: id,
           branchName: state.branchName,
           isNotified: state.hasUnseenNotifications,
-          classification: SidebarActiveClassification.classify(state)
+          classification: SidebarActiveClassification.classify(state),
+          attentionSince: state.needsAttention ? state.attentionSince : nil
         )
       )
     }

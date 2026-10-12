@@ -20,6 +20,8 @@ struct WorktreeMenuSnapshot: Equatable {
   /// A git worktree (not a folder) is selected, so Open Pull Request can act.
   var hasSelectedGitWorktree: Bool = false
   var notificationIndicatorCount: Int = 0
+  /// Rows with an agent parked on the user; gates Jump to Next Awaiting Agent.
+  var needsYouCount: Int = 0
 }
 
 extension AppFeature.State {
@@ -38,7 +40,8 @@ extension AppFeature.State {
       isInitialLoadComplete: repositories.isInitialLoadComplete,
       selectedPullRequestURL: pullRequestURL,
       hasSelectedGitWorktree: repositories.selectedWorktreeSlice.map { !$0.isFolder } ?? false,
-      notificationIndicatorCount: notificationIndicatorCount
+      notificationIndicatorCount: notificationIndicatorCount,
+      needsYouCount: repositories.needsYouCount
     )
   }
 
@@ -78,6 +81,7 @@ extension AppFeature.State {
       if old.notificationIndicatorCount != new.notificationIndicatorCount {
         diffs.append("notificationIndicatorCount")
       }
+      if old.needsYouCount != new.needsYouCount { diffs.append("needsYouCount") }
       menuSnapshotLogger.info("MenuSnapshot mutated. Fields: \(diffs.joined(separator: ", "))")
     }
   #endif
@@ -133,7 +137,7 @@ extension AppFeature.Action {
       .requestTerminateAllTerminalSessions, .newTerminal, .renameSelectedTerminalTab,
       .selectTerminalTabAtIndex, .selectNextTerminalTab, .selectPreviousTerminalTab,
       .splitTerminal, .toggleWindowModeForFocusedPane, .toggleSplitZoom,
-      .equalizeSplits, .focusSplit, .jumpToLatestUnread,
+      .equalizeSplits, .focusSplit, .jumpToLatestUnread, .jumpToNextAwaiting,
       .menuBarWorktreeSelected, .markAllNotificationsRead, .runScript, .runNamedScript,
       .manageRepositoryScripts,
       .stopScript, .stopRunScripts, .closeTab, .closeSurface,

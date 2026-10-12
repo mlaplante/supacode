@@ -133,6 +133,11 @@ struct SidebarItemFeature {
     /// An agent on this row stopped on an error. Sticky until it restarts or the
     /// user focuses the surface, and the top-priority Active-rail bucket.
     var hasAgentError: Bool { agentSnapshot.hasError }
+    /// An agent is parked on the user (awaiting input or errored). The one rule
+    /// behind the Active ordering, the menu bar's Needs You section and the jump command.
+    var needsAttention: Bool { agentSnapshot.agents.contains(where: { $0.activity.isAttention }) }
+    /// When the wait began; a missing stamp sorts last (`distantFuture`).
+    var attentionSince: Date { agentSnapshot.since ?? .distantFuture }
 
     var surfaceIDs: [UUID] = []
     /// Sticky once `terminalProjectionChanged` arrives, so a subsequent
