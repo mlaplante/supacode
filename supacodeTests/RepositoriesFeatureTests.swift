@@ -12375,6 +12375,174 @@ struct RepositoriesFeatureTests {
     }
   }
 
+  // MARK: - Branch sync.
+
+  private func makeSyncStore(
+    configure: @escaping (inout DependencyValues) -> Void = { _ in }
+  ) -> (TestStoreOf<RepositoriesFeature>, Worktree) {
+    let main = makeWorktree(id: "/tmp/repo", name: "main")
+    let worktree = makeWorktree(id: "/tmp/repo/feature", name: "feature")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [main, worktree])
+    var initialState = makeState(repositories: [repository])
+    initialState.selection = .worktree(main.id)
+    initialState.reconcileSidebarForTesting()
+    let store = TestStore(initialState: initialState) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.sidebarStructureAutoRecompute = false
+      configure(&$0)
+    }
+    store.exhaustivity = .off
+    return (store, worktree)
+  }
+
+  @Test func branchChangedRefreshesAheadBehind() async {
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.branchName = { _ in "feature" }
+      $0.gitClient.automaticWorktreeBaseRef = { _ in "origin/main" }
+      $0.gitClient.aheadBehind = { _, _ in GitAheadBehind(ahead: 2, behind: 7) }
+    }
+    await store.send(.worktreeInfoEvent(.branchChanged(worktreeID: worktree.id)))
+    await store.receive(\.worktreeAheadBehindLoaded)
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.sidebarItems[id: worktree.id]?.behindCount == 7)
+    #expect(store.state.sidebarItems[id: worktree.id]?.aheadCount == 2)
+    #expect(store.state.sidebarItems[id: worktree.id]?.syncBaseRef == "origin/main")
+  }
+
+  @Test func syncIsBlockedWhileAgentWorksOrTreeDirty() async {
+    let (store, worktree) = makeSyncStore()
+    await store.send(
+      .sidebarItems(
+        .element(id: worktree.id, action: .aheadBehindChanged(ahead: 0, behind: 3, base: "origin/main"))))
+    #expect(store.state.canSync(worktreeID: worktree.id))
+    await store.send(
+      .sidebarItems(
+        .element(
+          id: worktree.id,
+          action: .agentSnapshotChanged(
+            .init(
+              agents: [.init(agent: .claude, activity: .busy, since: .distantPast)],
+              isWorking: true,
+              hasError: false,
+              since: .distantPast
+            )))))
+    #expect(!store.state.canSync(worktreeID: worktree.id))
+  }
+
+  @Test func syncOnDirtyTreeAlertsAndSkipsRebase() async {
+    let rebased = LockIsolated(false)
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.fileStatus = { _ in
+        GitStatusSnapshot(statuses: ["a.txt": GitFileStatus(index: nil, worktree: .modified)])
+      }
+      $0.gitClient.rebaseOnto = { _, _ in rebased.setValue(true) }
+    }
+    await store.send(
+      .sidebarItems(
+        .element(id: worktree.id, action: .aheadBehindChanged(ahead: 1, behind: 3, base: "origin/main"))))
+    await store.send(.syncWorktreeWithBase(worktreeID: worktree.id, operation: .rebase))
+    await store.receive(\.syncWorktreeFinished)
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(!rebased.value)
+    #expect(store.state.alert != nil)
+    #expect(store.state.sidebarItems[id: worktree.id]?.isSyncing == false)
+  }
+
+  @Test func syncConflictShowsAlertAndKeepsCounts() async {
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.fileStatus = { _ in .empty }
+      $0.gitClient.rebaseOnto = { _, _ in throw GitSyncError.conflict(operation: .rebase) }
+    }
+    await store.send(
+      .sidebarItems(
+        .element(id: worktree.id, action: .aheadBehindChanged(ahead: 1, behind: 3, base: "origin/main"))))
+    await store.send(.syncWorktreeWithBase(worktreeID: worktree.id, operation: .rebase))
+    await store.receive(\.syncWorktreeFinished)
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.sidebarItems[id: worktree.id]?.behindCount == 3)
+    #expect(store.state.sidebarItems[id: worktree.id]?.isSyncing == false)
+    #expect(store.state.alert != nil)
+  }
+
+  @Test func syncSuccessRefreshesCounts() async {
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.fileStatus = { _ in .empty }
+      $0.gitClient.rebaseOnto = { _, _ in }
+      $0.gitClient.automaticWorktreeBaseRef = { _ in "origin/main" }
+      $0.gitClient.aheadBehind = { _, _ in GitAheadBehind(ahead: 1, behind: 0) }
+      $0.gitClient.lineChanges = { _ in (added: 0, removed: 0) }
+    }
+    await store.send(
+      .sidebarItems(
+        .element(id: worktree.id, action: .aheadBehindChanged(ahead: 1, behind: 3, base: "origin/main"))))
+    await store.send(.syncWorktreeWithBase(worktreeID: worktree.id, operation: .rebase))
+    await store.receive(\.syncWorktreeFinished)
+    await store.receive(\.worktreeAheadBehindLoaded)
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(store.state.sidebarItems[id: worktree.id]?.behindCount == nil)
+  }
+
+  @Test func readableSyncMessagePrefersFirstStderrLine() {
+    let error = GitSyncError.failed("stdout:\n\nstderr:\n\nfatal: bad ref\nmore")
+    #expect(error.readableMessage == "fatal: bad ref")
+  }
+
+  @Test func filesChangedProbesOnceWhenNoBaseResolves() async {
+    let probes = LockIsolated(0)
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.automaticWorktreeBaseRef = { _ in
+        probes.withValue { $0 += 1 }
+        return nil
+      }
+      $0.gitClient.lineChanges = { _ in (added: 0, removed: 0) }
+      $0.gitClient.branchName = { _ in "feature" }
+    }
+    await store.send(.worktreeInfoEvent(.filesChanged(worktreeID: worktree.id)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(probes.value == 1)
+    #expect(store.state.sidebarItems[id: worktree.id]?.hasProbedAheadBehind == true)
+    await store.send(.worktreeInfoEvent(.filesChanged(worktreeID: worktree.id)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(probes.value == 1)
+    await store.send(.worktreeInfoEvent(.branchChanged(worktreeID: worktree.id)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(probes.value == 2)
+  }
+
+  @Test func mergeSyncCallsMergeNotRebase() async {
+    let calls = LockIsolated<[String]>([])
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.fileStatus = { _ in .empty }
+      $0.gitClient.rebaseOnto = { _, _ in calls.withValue { $0.append("rebase") } }
+      $0.gitClient.mergeBaseRef = { _, base in calls.withValue { $0.append("merge \(base)") } }
+      $0.gitClient.automaticWorktreeBaseRef = { _ in "origin/main" }
+      $0.gitClient.aheadBehind = { _, _ in GitAheadBehind(ahead: 1, behind: 0) }
+      $0.gitClient.lineChanges = { _ in (added: 0, removed: 0) }
+    }
+    await store.send(
+      .sidebarItems(
+        .element(id: worktree.id, action: .aheadBehindChanged(ahead: 1, behind: 3, base: "origin/main"))))
+    await store.send(.syncWorktreeWithBase(worktreeID: worktree.id, operation: .merge))
+    await store.receive(\.syncWorktreeFinished)
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(calls.value == ["merge origin/main"])
+    #expect(store.state.sidebarItems[id: worktree.id]?.behindCount == nil)
+  }
+
+  @Test func readableSyncMessageFallsBackToFirstLineWithoutStderr() {
+    let error = GitSyncError.failed("stdout:\nCONFLICT in a.txt\nmore")
+    #expect(error.readableMessage == "CONFLICT in a.txt")
+  }
+
   private actor AsyncGate {
     var continuation: CheckedContinuation<Void, Never>?
     var isOpen = false

@@ -26,6 +26,9 @@ private enum CancelID {
   static func delayedPRRefresh(_ worktreeID: Worktree.ID) -> String {
     "repositories.delayedPRRefresh.\(worktreeID)"
   }
+  static func worktreeAheadBehind(_ worktreeID: Worktree.ID) -> String {
+    "repositories.worktreeAheadBehind.\(worktreeID)"
+  }
   static func worktreeLineChanges(_ worktreeID: Worktree.ID) -> String {
     "repositories.worktreeLineChanges.\(worktreeID)"
   }
@@ -562,6 +565,10 @@ struct RepositoriesFeature {
     case worktreeInfoEvent(WorktreeInfoWatcherClient.Event)
     case worktreeBranchNameLoaded(worktreeID: Worktree.ID, name: String)
     case worktreeLineChangesLoaded(worktreeID: Worktree.ID, added: Int, removed: Int)
+    case refreshAheadBehind(worktreeID: Worktree.ID)
+    case worktreeAheadBehindLoaded(worktreeID: Worktree.ID, result: GitAheadBehind?, base: String?)
+    case syncWorktreeWithBase(worktreeID: Worktree.ID, operation: GitSyncOperation)
+    case syncWorktreeFinished(worktreeID: Worktree.ID, result: Result<Void, GitSyncError>)
     case refreshGithubIntegrationAvailability
     case githubIntegrationAvailabilityUpdated(Bool)
     case repositoryPullRequestRefreshCompleted(Repository.ID)
@@ -2745,6 +2752,91 @@ struct RepositoriesFeature {
           removed: removed,
         )
 
+      case .refreshAheadBehind(let worktreeID):
+        guard let worktree = state.worktree(for: worktreeID), !worktree.isMissing else { return .none }
+        let gitClient = gitClient(for: worktree)
+        let override = state.syncBaseRefOverride(for: worktree)
+        let root = worktree.repositoryRootURL
+        let url = worktree.workingDirectory
+        return .run { send in
+          let base: String?
+          if let override, !override.isEmpty {
+            base = override
+          } else {
+            base = await gitClient.automaticWorktreeBaseRef(root)
+          }
+          guard let base else {
+            await send(.worktreeAheadBehindLoaded(worktreeID: worktreeID, result: nil, base: nil))
+            return
+          }
+          let result = await gitClient.aheadBehind(url, base)
+          await send(.worktreeAheadBehindLoaded(worktreeID: worktreeID, result: result, base: base))
+        }
+        .cancellable(id: CancelID.worktreeAheadBehind(worktreeID), cancelInFlight: true)
+
+      case .worktreeAheadBehindLoaded(let worktreeID, let result, let base):
+        guard state.sidebarItems[id: worktreeID] != nil else { return .none }
+        return .send(
+          .sidebarItems(
+            .element(
+              id: worktreeID,
+              action: .aheadBehindChanged(ahead: result?.ahead, behind: result?.behind, base: base)
+            )
+          )
+        )
+
+      case .syncWorktreeWithBase(let worktreeID, let operation):
+        guard state.canSync(worktreeID: worktreeID),
+          let worktree = state.worktree(for: worktreeID),
+          let base = state.sidebarItems[id: worktreeID]?.syncBaseRef
+        else { return .none }
+        let gitClient = gitClient(for: worktree)
+        let url = worktree.workingDirectory
+        return .concatenate(
+          .send(.sidebarItems(.element(id: worktreeID, action: .syncStateChanged(true)))),
+          .run { send in
+            // Dirty-tree guard runs here, not in canSync, because fileStatus is async.
+            if let status = await gitClient.fileStatus(url), !status.isClean {
+              await send(
+                .syncWorktreeFinished(
+                  worktreeID: worktreeID,
+                  result: .failure(.failed("Commit or stash your changes first."))
+                )
+              )
+              return
+            }
+            do {
+              switch operation {
+              case .rebase: try await gitClient.rebaseOnto(url, base)
+              case .merge: try await gitClient.mergeBaseRef(url, base)
+              }
+              await send(.syncWorktreeFinished(worktreeID: worktreeID, result: .success(())))
+            } catch let error as GitSyncError {
+              await send(.syncWorktreeFinished(worktreeID: worktreeID, result: .failure(error)))
+            } catch {
+              await send(
+                .syncWorktreeFinished(
+                  worktreeID: worktreeID,
+                  result: .failure(.failed(error.localizedDescription))
+                )
+              )
+            }
+          }
+        )
+
+      case .syncWorktreeFinished(let worktreeID, let result):
+        var effects: [Effect<Action>] = [
+          .send(.sidebarItems(.element(id: worktreeID, action: .syncStateChanged(false))))
+        ]
+        switch result {
+        case .success:
+          effects.append(.send(.refreshAheadBehind(worktreeID: worktreeID)))
+          effects.append(.send(.worktreeInfoEvent(.filesChanged(worktreeID: worktreeID))))
+        case .failure(let error):
+          state.alert = messageAlert(title: "Couldn't Sync With Base", message: error.readableMessage)
+        }
+        return .merge(effects)
+
       case .repositoryPullRequestsLoaded(let repositoryID, let pullRequestsByWorktreeID):
         guard let repository = state.repositories[id: repositoryID] else {
           return .none
@@ -3511,18 +3603,25 @@ struct RepositoriesFeature {
           }
           let worktreeURL = worktree.workingDirectory
           let gitClient = gitClient(for: worktree)
-          return .run { send in
-            if let name = await gitClient.branchName(worktreeURL) {
-              await send(.worktreeBranchNameLoaded(worktreeID: worktreeID, name: name))
-            }
-          }
+          return .merge(
+            .run { send in
+              if let name = await gitClient.branchName(worktreeURL) {
+                await send(.worktreeBranchNameLoaded(worktreeID: worktreeID, name: name))
+              }
+            },
+            .send(.refreshAheadBehind(worktreeID: worktreeID))
+          )
         case .filesChanged(let worktreeID):
           guard let worktree = state.worktree(for: worktreeID) else {
             return .none
           }
           let worktreeURL = worktree.workingDirectory
           let gitClient = gitClient(for: worktree)
-          return .run { send in
+          // First paint of the behind count without waiting for a branch change.
+          let needsAheadBehind = state.sidebarItems[id: worktreeID]?.hasProbedAheadBehind == false
+          // Coalesce overlapping diffs for the same worktree: a burst of
+          // reconcile / FS events can't stack diff processes.
+          let lineChanges: Effect<Action> = .run { send in
             if let changes = await gitClient.lineChanges(worktreeURL) {
               await send(
                 .worktreeLineChangesLoaded(
@@ -3533,9 +3632,11 @@ struct RepositoriesFeature {
               )
             }
           }
-          // Coalesce overlapping diffs for the same worktree: a burst of
-          // reconcile / FS events can't stack `git diff` processes.
           .cancellable(id: CancelID.worktreeLineChanges(worktreeID), cancelInFlight: true)
+          return .merge(
+            lineChanges,
+            needsAheadBehind ? .send(.refreshAheadBehind(worktreeID: worktreeID)) : .none
+          )
         case .repositoryPullRequestRefresh(let repositoryRootURL, let worktreeIDs, let trigger):
           // An automatic refresh is suppressed while the user has background
           // repository refresh off; a manual refresh always runs.
@@ -4688,7 +4789,8 @@ struct RepositoriesFeature {
         .forgeIntegrationDisabled, .pullRequestAction, .setGithubIntegrationEnabled, .setMergedWorktreeAction,
         .openSelectedWorktreePullRequest, .pullRequestOpenFetchLoaded, .pullRequestOpenFetchFailed,
         .setAutoDeleteArchivedWorktreesAfterDays, .autoDeleteExpiredArchivedWorktrees, .setMoveNotifiedWorktreeToTop,
-        .setInstalledOpenActions, .openActionSettingsChanged, .resolveOpenActions, .openActionsResolved:
+        .setInstalledOpenActions, .openActionSettingsChanged, .resolveOpenActions, .openActionsResolved,
+        .refreshAheadBehind, .worktreeAheadBehindLoaded, .syncWorktreeWithBase, .syncWorktreeFinished:
         // Real handling lives in `githubIntegrationReducer` (combined below) to keep `body`
         // under the type-checker's complexity limit.
         return .none
@@ -6623,6 +6725,19 @@ extension RepositoriesFeature.State {
     guard let current = sidebarItems[id: worktreeID]?.lifecycle else { return .none }
     guard current != lifecycle else { return .none }
     return .send(.sidebarItems(.element(id: worktreeID, action: .lifecycleChanged(lifecycle))))
+  }
+
+  /// Per-repo base ref override (same source worktree creation reads), if set.
+  func syncBaseRefOverride(for worktree: Worktree) -> String? {
+    guard let repositoryID = repositoryID(containing: worktree.id),
+      let repository = repositories[id: repositoryID]
+    else { return nil }
+    @Shared(.repositorySettings(repository.rootURL, host: repository.host)) var repositorySettings
+    return repositorySettings.worktreeBaseRef
+  }
+
+  func canSync(worktreeID: Worktree.ID) -> Bool {
+    sidebarItems[id: worktreeID]?.canSync ?? false
   }
 
   /// Row action dispatch for diff stats. 30 / 60 s polling re-emits the same

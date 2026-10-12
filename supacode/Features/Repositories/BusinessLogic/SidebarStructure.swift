@@ -436,6 +436,10 @@ extension SidebarItemFeature.Action {
     // row's resolved pull-request glyph into that cache.
     case .pullRequestChanged, .pullRequestDetailApplied:
       return [.selectedWorktreeSlice, .toolbarNotificationGroups]
+    // The accessory and the context menu (`SidebarContextRow(store.state)`) both
+    // read the leaf store directly, so no cache holds these fields.
+    case .aheadBehindChanged, .syncStateChanged:
+      return []
     case .diffStatsChanged, .pullRequestQueryStarted,
       .dragSessionChanged,
       .focusTerminalRequested, .focusTerminalConsumed:
@@ -523,6 +527,13 @@ extension RepositoriesFeature.Action {
     // and never mutates `state`. The downstream `.worktreeBranchNameLoaded` /
     // `.repositoryPullRequestsLoaded` arms declare their own invalidations.
     case .worktreeInfoEvent:
+      return []
+
+    // Launchers and results route into the row leaf via `.sidebarItems`, whose
+    // inner actions declare their own invalidations. `syncWorktreeFinished`
+    // only raises an alert (an `@Presents` field outside every cache).
+    case .refreshAheadBehind, .worktreeAheadBehindLoaded,
+      .syncWorktreeWithBase, .syncWorktreeFinished:
       return []
 
     // Pure effect launcher: spawns the async SSH resolution, mutates no state.

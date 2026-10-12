@@ -541,6 +541,10 @@ private struct TrailingView: View {
           DiffStatsContent(addedLines: added, removedLines: removed)
             .equatable()
         }
+        if let behind = store.behindCount {
+          BehindCountContent(behind: behind, base: store.syncBaseRef ?? "base")
+            .equatable()
+        }
         if let prText {
           PullRequestBadgeContent(text: prText)
             .equatable()
@@ -628,6 +632,21 @@ private struct DiffStatsContent: View, Equatable {
     .appFont(.caption)
     .monospacedDigit()
     .transition(.blurReplace)
+  }
+}
+
+private struct BehindCountContent: View, Equatable {
+  let behind: Int
+  let base: String
+
+  var body: some View {
+    Label("\(behind)", systemImage: "arrow.down")
+      .labelStyle(.titleAndIcon)
+      .appFont(.caption)
+      .monospacedDigit()
+      .foregroundStyle(.secondary)
+      .help("\(behind) commit\(behind == 1 ? "" : "s") behind \(base)")
+      .accessibilityLabel("\(behind) commits behind \(base)")
   }
 }
 
