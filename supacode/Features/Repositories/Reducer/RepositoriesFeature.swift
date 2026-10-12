@@ -621,6 +621,7 @@ struct RepositoriesFeature {
     case delayedPullRequestRefresh(Worktree.ID)
     case openRepositorySettings(Repository.ID)
     case requestCustomizeRepository(Repository.ID)
+    case setWorktreeSort(repositoryID: Repository.ID, sort: SidebarWorktreeSort)
     case requestCustomizeWorktree(Worktree.ID, Repository.ID)
     /// Deeplink / CLI appearance update: overwrites the row's sidebar title and tint.
     /// `nil` clears the field; omit-vs-clear was already resolved upstream in `AppFeature`.
@@ -4833,6 +4834,10 @@ struct RepositoriesFeature {
         )
         return .none
 
+      case .setWorktreeSort(let repositoryID, let sort):
+        state.$sidebar.withLock { $0.sections[repositoryID, default: .init()].worktreeSort = sort }
+        return .none
+
       case .repositoryCustomization(.presented(.delegate(.cancel))):
         state.repositoryCustomization = nil
         return .none
@@ -6439,9 +6444,17 @@ extension RepositoriesFeature.State {
       }
       let pinnedTail = pinnedRows.filter { $0 != mainID }
       let pendingTail = unpinnedRows.filter { pendingIDs.contains($0) }
-      let unpinnedTail = unpinnedRows.filter { !pendingIDs.contains($0) }
       let isGit = repositories[id: repositoryID]?.isGitRepository == true
       let useNesting = sidebarNestWorktreesByBranch && isGit
+      // Same order `computeSlots` renders; see `SidebarItemGroup.sortedUnpinnedTail`.
+      let unpinnedTail = SidebarItemGroup.sortedUnpinnedTail(
+        unpinnedRows.filter { !pendingIDs.contains($0) },
+        repositoryID: repositoryID,
+        nest: useNesting,
+        in: self
+      )
+      let unpinnedRanks = SidebarItemGroup.sortRanks(
+        unpinnedTail, sort: sidebar.sections[repositoryID]?.worktreeSort ?? .manual)
 
       if let mainID { ids.append(mainID) }
       ids.append(
@@ -6460,7 +6473,8 @@ extension RepositoriesFeature.State {
           repositoryID: repositoryID,
           bucket: .unpinned,
           useNesting: useNesting,
-          ignoreCollapsedGroups: ignoreCollapsedGroups
+          ignoreCollapsedGroups: ignoreCollapsedGroups,
+          siblingRanks: unpinnedRanks
         )
       )
     }
@@ -6476,7 +6490,8 @@ extension RepositoriesFeature.State {
     repositoryID: Repository.ID,
     bucket: SidebarBucket,
     useNesting: Bool,
-    ignoreCollapsedGroups: Bool
+    ignoreCollapsedGroups: Bool,
+    siblingRanks: [SidebarItemID: Int]? = nil
   ) -> [SidebarItemID] {
     guard useNesting, !rowIDs.isEmpty else { return rowIDs }
     let collapsedPrefixes: Set<String> =
@@ -6493,7 +6508,8 @@ extension RepositoriesFeature.State {
     let rows = SidebarBranchNesting.buildRows(
       itemIDs: rowIDs,
       branchNames: branchNames,
-      collapsedPrefixes: collapsedPrefixes
+      collapsedPrefixes: collapsedPrefixes,
+      siblingRanks: siblingRanks
     )
     return rows.compactMap { row in
       if case .leaf(let id, _, _) = row { return id }

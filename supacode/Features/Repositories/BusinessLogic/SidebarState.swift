@@ -98,17 +98,22 @@ nonisolated struct SidebarState: Equatable, Sendable, Codable {
     /// Optional user-supplied tint applied to the sidebar header.
     /// `nil` means "default / no tint".
     var color: RepositoryColor?
+    /// Display order of the unpinned worktrees. An overlay on the persisted
+    /// drag order, which sorted modes never rewrite.
+    var worktreeSort: SidebarWorktreeSort
 
     init(
       collapsed: Bool = false,
       buckets: OrderedDictionary<BucketID, Bucket> = [:],
       title: String? = nil,
-      color: RepositoryColor? = nil
+      color: RepositoryColor? = nil,
+      worktreeSort: SidebarWorktreeSort = .manual
     ) {
       self.collapsed = collapsed
       self.buckets = buckets
       self.title = title
       self.color = color
+      self.worktreeSort = worktreeSort
     }
 
     private enum SectionCodingKeys: String, CodingKey {
@@ -116,6 +121,7 @@ nonisolated struct SidebarState: Equatable, Sendable, Codable {
       case buckets
       case title
       case color
+      case worktreeSort
     }
 
     init(from decoder: any Decoder) throws {
@@ -131,6 +137,8 @@ nonisolated struct SidebarState: Equatable, Sendable, Codable {
         ) ?? [:]
       self.title = try container.decodeIfPresent(String.self, forKey: .title)
       self.color = try container.decodeIfPresent(RepositoryColor.self, forKey: .color)
+      self.worktreeSort =
+        (try? container.decodeIfPresent(SidebarWorktreeSort.self, forKey: .worktreeSort)) ?? .manual
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -143,6 +151,9 @@ nonisolated struct SidebarState: Equatable, Sendable, Codable {
       // stays clean for repos the user never touched.
       try container.encodeIfPresent(title, forKey: .title)
       try container.encodeIfPresent(color, forKey: .color)
+      if worktreeSort != .manual {
+        try container.encode(worktreeSort, forKey: .worktreeSort)
+      }
     }
   }
 

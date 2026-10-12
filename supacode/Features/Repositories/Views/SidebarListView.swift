@@ -394,6 +394,17 @@ private struct SidebarSectionActionsView: View {
       }
       .help("Set a custom title or color")
       .disabled(isRemovingRepository)
+      Picker(
+        "Sort Worktrees",
+        selection: Binding(
+          get: { store.state.sidebar.sections[repositoryID]?.worktreeSort ?? .manual },
+          set: { store.send(.setWorktreeSort(repositoryID: repositoryID, sort: $0)) }
+        )
+      ) {
+        ForEach(SidebarWorktreeSort.allCases) { Text($0.menuTitle).tag($0) }
+      }
+      .help("Order this repository's worktrees")
+      .disabled(isRemovingRepository)
       if isRemote {
         Button("Edit Connection…", systemImage: "wifi") {
           store.send(.requestEditRemoteRepository(repositoryID))
