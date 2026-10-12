@@ -757,6 +757,17 @@ struct AppFeature {
           await terminalClient.send(.selectTab(worktree, tabID: tabId))
         }
 
+      case .settings(.delegate(.sendHookTestEvent(let agent))):
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
+          return .send(.settings(.hookTestEventFailed(agent, reason: "Select a worktree first.")))
+        }
+        let input = AgentHookActivityClient.testEventInput(for: agent)
+        return .run { _ in
+          await terminalClient.send(
+            .createTabWithInput(worktree, input: input, runSetupScriptIfNew: false)
+          )
+        }
+
       case .settings(.delegate(.settingsChanged(let settings))):
         let shouldCheckSystemNotificationPermission =
           settings.systemNotificationsEnabled && !state.lastKnownSystemNotificationsEnabled

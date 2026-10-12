@@ -260,7 +260,7 @@ private struct AgentIntegrationRow: View {
           if installed == .installed {
             Button("Send Test Event") { store.send(.agentSendTestEventTapped(agent)) }
               .help(
-                "Run \(agent.displayName)'s installed hook against the focused terminal to confirm events reach Supacode"
+                "Opens a terminal tab in the selected worktree that runs the installed hook command, so the full event path is checked."
               )
           }
         }

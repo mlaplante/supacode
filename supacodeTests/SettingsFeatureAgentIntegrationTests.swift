@@ -1352,25 +1352,21 @@ struct SettingsFeatureAgentIntegrationTests {
       SettingsFeature()
     } withDependencies: {
       $0.continuousClock = clock
-      $0.agentHookActivityClient.sendTestEvent = { _ in }
       $0.agentHookActivityClient.lastEventDates = { [.codex: t] }
     }
     store.exhaustivity = .off
     await store.send(.agentSendTestEventTapped(.codex))
+    await store.receive(\.delegate.sendHookTestEvent)
     await clock.advance(by: .seconds(3))
     await store.receive(\.refreshHookActivity)
     await store.receive(\.hookActivityLoaded) { $0.lastHookEventAt = [.codex: t] }
   }
 
-  @Test(.dependencies) func testEventFailureIsRecorded() async {
-    let store = TestStore(initialState: SettingsFeature.State()) {
-      SettingsFeature()
-    } withDependencies: {
-      $0.agentHookActivityClient.sendTestEvent = { _ in throw IntegrationTestError.boom }
+  @Test(.dependencies) func hookTestEventFailureIsRecorded() async {
+    let store = TestStore(initialState: SettingsFeature.State()) { SettingsFeature() }
+    await store.send(.hookTestEventFailed(.claude, reason: "boom")) {
+      $0.hookTestFailures = [.claude: "boom"]
     }
-    store.exhaustivity = .off
-    await store.send(.agentSendTestEventTapped(.claude))
-    await store.receive(\.hookTestEventFailed) { $0.hookTestFailures = [.claude: "boom"] }
   }
 
   @Test func hookStatusLineVariants() {

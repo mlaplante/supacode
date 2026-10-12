@@ -297,6 +297,8 @@ public struct SettingsFeature {
   @CasePathable
   public enum Delegate: Equatable {
     case settingsChanged(GlobalSettings)
+    /// Ask the app to run the agent's hook in a terminal tab.
+    case sendHookTestEvent(SkillAgent)
   }
 
   @Dependency(AnalyticsClient.self) private var analyticsClient
@@ -341,15 +343,13 @@ public struct SettingsFeature {
 
       case .agentSendTestEventTapped(let agent):
         state.hookTestFailures[agent] = nil
-        return .run { [agentHookActivityClient, clock] send in
-          do {
-            try await agentHookActivityClient.sendTestEvent(agent)
+        return .merge(
+          .send(.delegate(.sendHookTestEvent(agent))),
+          .run { [clock] send in
             try await clock.sleep(for: .seconds(3))
             await send(.refreshHookActivity)
-          } catch {
-            await send(.hookTestEventFailed(agent, reason: error.localizedDescription))
           }
-        }
+        )
 
       case .hookTestEventFailed(let agent, let reason):
         state.hookTestFailures[agent] = reason
