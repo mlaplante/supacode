@@ -328,6 +328,7 @@ struct AppFeature {
     case selectPreviousTerminalTab
     case splitTerminal(TerminalSplitMenuDirection)
     case jumpToLatestUnread
+    case jumpToNextAwaiting
     case menuBarWorktreeSelected(worktreeID: Worktree.ID)
     case markAllNotificationsRead
     case runScript
@@ -1172,6 +1173,31 @@ struct AppFeature {
               .focusSurface(worktree, tabID: location.tabID, surfaceID: location.surfaceID)
             )
             await terminalClient.markNotificationRead(location.worktreeID, location.notificationID)
+          }
+        )
+
+      case .jumpToNextAwaiting:
+        guard let worktreeID = state.repositories.needsYouRowIDs().first,
+          let worktree = state.repositories.worktree(for: worktreeID),
+          let row = state.repositories.sidebarItems[id: worktreeID]
+        else {
+          jumpLogger.debug("jumpToNextAwaiting invoked with no awaiting agents.")
+          return .run { _ in NSSound.beep() }
+        }
+        // The surface whose agent waited longest. Presence is keyed per surface,
+        // so ask the presence state rather than the row snapshot.
+        let surfaceID = state.agentPresence.records
+          .filter { row.surfaceIDs.contains($0.key.surfaceID) && $0.value.activity.isAttention }
+          .min { $0.value.activitySince < $1.value.activitySince }?
+          .key.surfaceID
+        // Surfaces close between presence updates; a stale id degrades to a plain select.
+        let tabID = surfaceID.flatMap { terminalClient.tabID(worktreeID, $0) }
+        analyticsClient.capture("agents_jump_to_next_awaiting", nil)
+        return .merge(
+          .send(.repositories(.selectWorktree(worktreeID, focusTerminal: tabID == nil))),
+          .run { _ in
+            guard let surfaceID, let tabID else { return }
+            await terminalClient.send(.focusSurface(worktree, tabID: tabID, surfaceID: surfaceID))
           }
         )
 

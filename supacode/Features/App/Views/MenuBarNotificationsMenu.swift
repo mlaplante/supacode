@@ -39,6 +39,10 @@ struct MenuBarNotificationsMenu: View {
         }
       }
       MenuBarDivider()
+      MenuBarActionRow(title: "Jump to Next Awaiting Agent", isEnabled: !sections.needsYou.isEmpty) {
+        showMainWindow()
+        store.send(.jumpToNextAwaiting)
+      }
       MenuBarActionRow(
         title: unreadCount > 0
           ? "Mark \(unreadCount) Unread Notification\(unreadCount == 1 ? "" : "s") as Read"
