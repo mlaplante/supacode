@@ -550,7 +550,11 @@ private struct TrailingView: View {
             .equatable()
         }
         if !agents.isEmpty {
-          RunningAgentsBadgeContent(agents: agents)
+          RunningAgentsBadgeContent(
+            agents: agents,
+            since: store.agentSnapshot.since,
+            showsElapsed: agents.contains { $0.activity.isAttention }
+          )
             .equatable()
         }
         if hasStatus {
@@ -605,9 +609,20 @@ private struct PullRequestBadgeContent: View, Equatable {
 
 private struct RunningAgentsBadgeContent: View, Equatable {
   let agents: [AgentPresenceFeature.AgentInstance]
+  /// Earliest attention (else working) timestamp from the row's `agentSnapshot`.
+  let since: Date?
+  let showsElapsed: Bool
 
   var body: some View {
-    AgentAvatarGroupView(instances: agents, size: 16)
+    HStack(spacing: 4) {
+      AgentAvatarGroupView(instances: agents, size: 16)
+      if showsElapsed, let since {
+        ElapsedLabel(
+          since: since,
+          stateLabel: agents.contains { $0.activity == .awaitingInput } ? "waiting" : "errored"
+        )
+      }
+    }
   }
 }
 
