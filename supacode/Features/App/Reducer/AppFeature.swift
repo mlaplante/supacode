@@ -764,7 +764,7 @@ struct AppFeature {
         let input = AgentHookActivityClient.testEventInput(for: agent)
         return .run { _ in
           await terminalClient.send(
-            .createTabWithInput(worktree, input: input, runSetupScriptIfNew: false)
+            .createTabWithInput(worktree, input: input, runSetupScriptIfNew: false, focusing: false)
           )
         }
 

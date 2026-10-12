@@ -40,11 +40,15 @@ struct AppFeatureHookTestEventTests {
     await store.send(.settings(.delegate(.sendHookTestEvent(.codex))))
     await store.finish()
 
-    guard case .createTabWithInput(let target, let input, _, _, _, _, _)? = sent.value.first else {
+    guard
+      case .createTabWithInput(let target, let input, let runSetup, _, _, let focusing, _)? = sent.value.first
+    else {
       Issue.record("Expected createTabWithInput, got \(sent.value)")
       return
     }
     #expect(target == worktree)
+    #expect(runSetup == false)
+    #expect(focusing == false)
     #expect(input.contains("event=idle"))
     #expect(input.contains("start=codex"))
     #expect(input.hasSuffix("\n"))

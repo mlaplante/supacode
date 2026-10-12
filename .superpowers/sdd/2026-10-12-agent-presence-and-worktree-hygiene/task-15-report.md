@@ -21,3 +21,11 @@ Tests added to `SettingsFeatureAgentIntegrationTests` (hookActivityLoadsIntoStat
 - Button tooltip updated per ruling.
 - Tests: SettingsFeatureAgentIntegrationTests (delegate emitted, refresh after 3s via TestClock, failure recorded), new supacodeTests/AppFeatureHookTestEventTests.swift (matches the AppFeature* glob, so it runs in supacodeFeatureTests): createTabWithInput input contains `event=idle`, `start=codex`; failure when no worktree.
 - Command: xcodebuild test ... -only-testing:supacodeTests/SettingsFeatureAgentIntegrationTests -only-testing:supacodeFeatureTests/AppFeatureHookTestEventTests -> TEST SUCCEEDED; `make build-app` exit 0.
+
+## Fix round 2
+- Live refresh: new `startHookActivityPolling`/`stopHookActivityPolling` actions (cancellable loop, refresh then 5s on the injected clock); DeveloperSettingsView calls them from `.onAppear`/`.onDisappear`. TimelineView tick now 5s.
+- Test-event feedback: `agentSendTestEventTapped` polls `lastEventDates` every 2s for up to 15s (per-agent cancellable); stops on an event newer than the tap time, else sets `hookTestFailures[agent] = "No event received; check that <config dir> contains the managed hooks."`.
+- Minors: `focusing: false` on createTabWithInput; `AgentHookStatus` locals renamed; tooltip wrapped; AppFeature test asserts runSetupScriptIfNew == false and focusing == false.
+- Tests (TestClock): pollingRefreshesEveryFiveSeconds, testEventSuccessStopsPollingWithoutFailure, testEventTimeoutSetsFailureAfterFifteenSeconds, plus existing ones.
+- Command: xcodebuild test ... -only-testing:supacodeTests/SettingsFeatureAgentIntegrationTests -only-testing:supacodeFeatureTests/AppFeatureHookTestEventTests -> TEST SUCCEEDED; `make build-app` exit 0.
+- Lint/format: `make format` reformatted unrelated files (reverted them); `make lint` reports no violations in my files (remaining ones are pre-existing in GitClientDependency, AgentPresenceFeature, SidebarStructureTests, LayoutPersistenceTests).

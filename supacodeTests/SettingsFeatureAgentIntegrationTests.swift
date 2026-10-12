@@ -1345,21 +1345,68 @@ struct SettingsFeatureAgentIntegrationTests {
     await store.receive(\.hookActivityLoaded) { $0.lastHookEventAt = [.claude: t] }
   }
 
-  @Test(.dependencies) func testEventRefreshesAfterDelay() async {
+  @Test(.dependencies) func pollingRefreshesEveryFiveSeconds() async {
     let clock = TestClock()
-    let t = Date(timeIntervalSince1970: 5)
+    let calls = LockIsolated(0)
     let store = TestStore(initialState: SettingsFeature.State()) {
       SettingsFeature()
     } withDependencies: {
       $0.continuousClock = clock
-      $0.agentHookActivityClient.lastEventDates = { [.codex: t] }
+      $0.agentHookActivityClient.lastEventDates = {
+        calls.withValue { $0 += 1 }
+        return [:]
+      }
+    }
+    store.exhaustivity = .off
+    await store.send(.startHookActivityPolling)
+    await store.receive(\.hookActivityLoaded)
+    await clock.advance(by: .seconds(5))
+    await store.receive(\.hookActivityLoaded)
+    #expect(calls.value == 2)
+    await store.send(.stopHookActivityPolling)
+  }
+
+  @Test(.dependencies) func testEventSuccessStopsPollingWithoutFailure() async {
+    let clock = TestClock()
+    let tapped = Date(timeIntervalSince1970: 100)
+    let seen = LockIsolated<[SkillAgent: Date]>([:])
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.date.now = tapped
+      $0.agentHookActivityClient.lastEventDates = { seen.value }
     }
     store.exhaustivity = .off
     await store.send(.agentSendTestEventTapped(.codex))
     await store.receive(\.delegate.sendHookTestEvent)
-    await clock.advance(by: .seconds(3))
-    await store.receive(\.refreshHookActivity)
-    await store.receive(\.hookActivityLoaded) { $0.lastHookEventAt = [.codex: t] }
+    seen.setValue([.codex: tapped.addingTimeInterval(1)])
+    await clock.advance(by: .seconds(2))
+    await store.receive(\.hookActivityLoaded) {
+      $0.lastHookEventAt = [.codex: tapped.addingTimeInterval(1)]
+    }
+    await clock.advance(by: .seconds(20))
+    #expect(store.state.hookTestFailures[.codex] == nil)
+  }
+
+  @Test(.dependencies) func testEventTimeoutSetsFailureAfterFifteenSeconds() async {
+    let clock = TestClock()
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.date.now = Date(timeIntervalSince1970: 100)
+    }
+    store.exhaustivity = .off
+    await store.send(.agentSendTestEventTapped(.codex))
+    await store.receive(\.delegate.sendHookTestEvent)
+    await clock.advance(by: .seconds(14))
+    #expect(store.state.hookTestFailures[.codex] == nil)
+    await clock.advance(by: .seconds(1))
+    await store.receive(\.hookTestEventFailed)
+    let message = store.state.hookTestFailures[.codex] ?? ""
+    #expect(message.hasPrefix("No event received; check that "))
+    #expect(message.contains(".codex"))
   }
 
   @Test(.dependencies) func hookTestEventFailureIsRecorded() async {

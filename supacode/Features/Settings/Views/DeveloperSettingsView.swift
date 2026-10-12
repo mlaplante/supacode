@@ -51,6 +51,8 @@ struct DeveloperSettingsView: View {
     .padding(.leading, -8)
     .padding(.trailing, -6)
     .navigationTitle("Developer")
+    .onAppear { store.send(.startHookActivityPolling) }
+    .onDisappear { store.send(.stopHookActivityPolling) }
     .sheet(isPresented: $store.agentInstallSheetPresented.sending(\.setAgentInstallSheetPresented)) {
       AgentInstallSheetView(store: store)
     }
@@ -249,7 +251,7 @@ private struct AgentIntegrationRow: View {
   @ViewBuilder
   private var hookStatusLine: some View {
     if let installed = (store.agentIntegrationStates[agent] ?? .checking).lastKnownState {
-      TimelineView(.periodic(from: .now, by: 30)) { context in
+      TimelineView(.periodic(from: .now, by: 5)) { context in
         let status = AgentHookStatus.resolve(
           installed: installed, lastEventAt: store.lastHookEventAt[agent], now: context.date)
         HStack(spacing: 6) {
@@ -260,7 +262,8 @@ private struct AgentIntegrationRow: View {
           if installed == .installed {
             Button("Send Test Event") { store.send(.agentSendTestEventTapped(agent)) }
               .help(
-                "Opens a terminal tab in the selected worktree that runs the installed hook command, so the full event path is checked."
+                "Opens a terminal tab in the selected worktree that runs the installed hook command, "
+                  + "so the full event path is checked."
               )
           }
         }
