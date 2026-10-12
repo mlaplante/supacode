@@ -1161,6 +1161,15 @@ struct AgentPresenceFeatureTests {
     #expect(record.activitySince == nil)
   }
 
+  @Test func agentsBySurfaceRoundTripsActivitySince() {
+    let t = Date(timeIntervalSince1970: 777)
+    var harness = Harness(now: t)
+    let a = UUID()
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: a, pid: getpid())))
+    let records = harness.state.agentsBySurface()[a]
+    #expect(records?.first?.activitySince == t)
+  }
+
   // MARK: - Layout helpers for restore tests.
 
   private func makeLayout(
