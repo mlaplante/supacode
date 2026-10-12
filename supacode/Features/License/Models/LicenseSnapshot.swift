@@ -1,13 +1,8 @@
 import Foundation
 
 nonisolated enum LicenseBuild {
-  static var isEnforced: Bool {
-    #if DEBUG
-      false
-    #else
-      true
-    #endif
-  }
+  // Personal fork: licensing is never enforced, in any build configuration.
+  static var isEnforced: Bool { false }
 
   static var releaseDay: LicenseDay? {
     (Bundle.main.object(forInfoDictionaryKey: "SupacodeReleaseDay") as? String)
