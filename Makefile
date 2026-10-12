@@ -141,6 +141,9 @@ build-app-release: $(TUIST_RELEASE_GENERATION_STAMP) # Build the macOS app (Rele
 
 # Debug builds run TCA and SwiftUI at -Onone and print every log line, which
 # scales badly with worktree count. Daily use should install this target.
+# The Release entitlements omit disable-library-validation, so an ad hoc
+# signed hardened-runtime app refuses the ad hoc Sparkle framework at launch
+# ("different Team IDs"). Re-sign with the Debug entitlements, as Xcode does.
 install-release-build: build-app-release # Install optimized Release build to /Applications
 	@$(SELECT_DEVELOPER_DIR); \
 	settings="$$(xcodebuild -workspace "$(PROJECT_WORKSPACE)" -scheme "$(APP_SCHEME)" -configuration Release -derivedDataPath "$(DERIVED_DATA_PATH)" -showBuildSettings -json 2>/dev/null)"; \
@@ -155,6 +158,10 @@ install-release-build: build-app-release # Install optimized Release build to /A
 	echo "copying $$src -> $$dst"; \
 	rm -rf "$$dst"; \
 	ditto "$$src" "$$dst"; \
+	echo "re-signing ad hoc with library validation disabled"; \
+	codesign --force --deep --sign - --options runtime "$$dst/Contents/Frameworks/Sparkle.framework"; \
+	codesign --force --sign - --options runtime --entitlements supacode/supacodeDebug.entitlements "$$dst"; \
+	codesign --verify --deep --strict "$$dst"; \
 	echo "installed $$dst"
 
 archive: $(TUIST_RELEASE_GENERATION_STAMP) # Archive Release build for distribution
