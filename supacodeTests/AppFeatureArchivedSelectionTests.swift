@@ -221,7 +221,7 @@ struct AppFeatureArchivedSelectionTests {
     appState.agentPresence.bySurface[surfaceID] = [.claude]
     appState.agentPresence.records[
       AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
-    ] = AgentPresenceFeature.PresenceRecord(activity: .awaitingInput, pids: [42])
+    ] = AgentPresenceFeature.PresenceRecord(activity: .awaitingInput, pids: [42], activitySince: .distantPast)
     let sentCommands = LockIsolated<[TerminalClient.Command]>([])
 
     let store = TestStore(initialState: appState) {
@@ -239,7 +239,7 @@ struct AppFeatureArchivedSelectionTests {
       \.repositories.sidebarItems[id: worktree.id].agentSnapshotChanged
     ) {
       $0.repositories.sidebarItems[id: worktree.id]?.agentSnapshot.agents = [
-        AgentPresenceFeature.AgentInstance(agent: .claude, activity: .awaitingInput)
+        AgentPresenceFeature.AgentInstance(agent: .claude, activity: .awaitingInput, since: .distantPast)
       ]
     }
     // The agent tick parks its structure rebuild; the immediate clock flushes it.
@@ -298,7 +298,7 @@ struct AppFeatureArchivedSelectionTests {
     appState.agentPresence.bySurface[surfaceID] = [.claude]
     appState.agentPresence.records[
       AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
-    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42])
+    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42], activitySince: .distantPast)
     let sentCommands = LockIsolated<[TerminalClient.Command]>([])
     let clock = TestClock()
 
@@ -330,7 +330,7 @@ struct AppFeatureArchivedSelectionTests {
       \.repositories.sidebarItems[id: worktree.id].agentSnapshotChanged
     ) {
       $0.repositories.sidebarItems[id: worktree.id]?.agentSnapshot.agents = [
-        AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+        AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
       ]
       $0.repositories.sidebarItems[id: worktree.id]?.agentSnapshot.isWorking = true
     }
@@ -349,7 +349,7 @@ struct AppFeatureArchivedSelectionTests {
     appState.agentPresence.bySurface[surfaceID] = [.claude]
     appState.agentPresence.records[
       AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
-    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42])
+    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42], activitySince: .distantPast)
     let savedAgents = LockIsolated<[UUID: [TerminalLayoutSnapshot.SurfaceAgentRecord]]?>(nil)
     let clock = TestClock()
 
@@ -439,7 +439,7 @@ struct AppFeatureArchivedSelectionTests {
     appState.agentPresence.bySurface[surfaceID] = [.claude]
     appState.agentPresence.records[
       AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
-    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42])
+    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42], activitySince: .distantPast)
     let writeCount = LockIsolated(0)
     let clock = TestClock()
 

@@ -30,7 +30,7 @@ struct AgentAvatarGroupView: View {
   /// every supported agent) where no presence/activity is involved.
   init(agents: [SkillAgent], size: CGFloat = 14, maxVisible: Int = 3) {
     self.init(
-      instances: agents.map { .init(agent: $0, activity: .idle) },
+      instances: agents.map { .init(agent: $0, activity: .idle, since: .distantPast) },
       size: size,
       maxVisible: maxVisible
     )

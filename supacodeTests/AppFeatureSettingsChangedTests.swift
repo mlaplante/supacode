@@ -60,7 +60,7 @@ struct AppFeatureSettingsChangedTests {
     var repositoriesState = RepositoriesFeature.State(reconciledRepositories: [repository])
     let surfaceID = UUID()
     let idleSurfaceID = UUID()
-    let agent = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let agent = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     repositoriesState.sidebarItems[id: worktree.id]?.surfaceIDs = [surfaceID, idleSurfaceID]
     repositoriesState.sidebarItems[id: worktree.id]?.agentSnapshot.agents = [agent]
     repositoriesState.sidebarItems[id: worktree.id]?.agentSnapshot.isWorking = true
@@ -71,7 +71,7 @@ struct AppFeatureSettingsChangedTests {
     appState.agentPresence.bySurface[surfaceID] = [.claude]
     appState.agentPresence.records[
       AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
-    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42])
+    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42], activitySince: .distantPast)
     let store = TestStore(initialState: appState) {
       AppFeature()
     }
@@ -130,7 +130,7 @@ struct AppFeatureSettingsChangedTests {
     appState.agentPresence.bySurface[changedSurfaceID] = [.claude]
     appState.agentPresence.records[
       AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: changedSurfaceID)
-    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42])
+    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42], activitySince: .distantPast)
     let clock = TestClock()
     let store = TestStore(initialState: appState) {
       AppFeature()
@@ -140,7 +140,7 @@ struct AppFeatureSettingsChangedTests {
       $0.terminalClient.saveLayoutsWithAgents = { _ in }
       $0.terminalClient.send = { _ in }
     }
-    let agent = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let agent = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
 
     await store.send(.agentPresence(.delegate(.surfacesChanged([changedSurfaceID]))))
     await store.receive(
@@ -167,7 +167,7 @@ struct AppFeatureSettingsChangedTests {
     appState.agentPresence.bySurface[surfaceID] = [.claude]
     appState.agentPresence.records[
       AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
-    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42])
+    ] = AgentPresenceFeature.PresenceRecord(activity: .busy, pids: [42], activitySince: .distantPast)
     let clock = TestClock()
     let store = TestStore(initialState: appState) {
       AppFeature()
@@ -181,7 +181,7 @@ struct AppFeatureSettingsChangedTests {
     await store.send(.agentPresence(.delegate(.surfacesChanged([surfaceID]))))
     await clock.advance(by: .seconds(1))
     await store.finish()
-    #expect(content.terminalChrome.agents == [.init(agent: .claude, activity: .busy)])
+    #expect(content.terminalChrome.agents == [.init(agent: .claude, activity: .busy, since: .distantPast)])
     #expect(content.terminalChrome.isWorking)
   }
 
@@ -191,7 +191,7 @@ struct AppFeatureSettingsChangedTests {
     let content = ChromeTabContent(id: ContentID(rawValue: surfaceID))
     #expect(runtime.provision(content, at: .fallback))
     // Stale badge from an earlier snapshot; the empty delta must clear it.
-    content.terminalChrome.agents = [.init(agent: .claude, activity: .busy)]
+    content.terminalChrome.agents = [.init(agent: .claude, activity: .busy, since: .distantPast)]
     content.terminalChrome.isWorking = true
     let clock = TestClock()
     let store = TestStore(
@@ -301,7 +301,7 @@ struct AppFeatureSettingsChangedTests {
       appState.agentPresence.bySurface[surfaceID] = [.claude]
       appState.agentPresence.records[
         AgentPresenceFeature.PresenceKey(agent: .claude, surfaceID: surfaceID)
-      ] = AgentPresenceFeature.PresenceRecord(activity: .error, pids: [42])
+      ] = AgentPresenceFeature.PresenceRecord(activity: .error, pids: [42], activitySince: .distantPast)
     }
 
     let store = TestStore(initialState: appState) {

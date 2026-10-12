@@ -34,6 +34,8 @@ struct AgentPresenceFeature {
   struct AgentInstance: Hashable, Sendable {
     let agent: SkillAgent
     let activity: Activity
+    /// When `activity` began. Drives the elapsed-time label and the needs-you order.
+    let since: Date
 
     /// The avatar group flips contrast on awaiting-input instances.
     var awaitingInput: Bool { activity == .awaitingInput }
@@ -46,6 +48,9 @@ struct AgentPresenceFeature {
     var agents: [AgentInstance] = []
     var isWorking = false
     var hasError = false
+    /// Earliest `since` among attention-state agents, else among working agents,
+    /// else nil. The row shows elapsed time off this; the queue orders by it.
+    var since: Date?
   }
 
   // `nonisolated` so `stageRestore` (off-main at launch) can use Hashable.
@@ -62,11 +67,15 @@ struct AgentPresenceFeature {
     /// arrives over OSC now, so there is no "socket-owned" record to defend
     /// against.
     var pids: Set<pid_t>
+    /// When `activity` last changed. Restamped by every transition, including
+    /// `clearAttention` and a sticky-state reset on restart.
+    var activitySince: Date
   }
 
   nonisolated struct RestoredRecord: Sendable {
     let alivePids: Set<pid_t>
     let activity: Activity
+    let activitySince: Date
   }
 
   // `nonisolated` is load-bearing here. Without it the @Reducer macro
@@ -107,6 +116,10 @@ struct AgentPresenceFeature {
     /// Per-surface agent presence. A surface can host multiple agents (rare,
     /// but possible if e.g. Claude spawns Codex). Order not guaranteed; sort before display.
     var bySurface: [UUID: Set<SkillAgent>] = [:]
+    /// Wall-clock of the last hook event per agent, stamped on every
+    /// `hookEventReceived` whether or not activity changed. Not persisted; the
+    /// settings health check reads it through `AgentHookActivityClient`.
+    var lastEventAt: [SkillAgent: Date] = [:]
   }
 
   /// Period between liveness sweeps. Cost scales with active sessions, not
@@ -117,12 +130,14 @@ struct AgentPresenceFeature {
   var body: some Reducer<State, Action> {
     Reduce { state, action in
       @Dependency(\.continuousClock) var clock
+      @Dependency(\.date.now) var now
       switch action {
       case .delegate:
         return .none
 
       case .hookEventReceived(let event):
-        let changed = Self.apply(event: event, into: &state)
+        if let agent = SkillAgent(rawValue: event.agent) { state.lastEventAt[agent] = now }
+        let changed = Self.apply(event: event, now: now, into: &state)
         return Self.surfacesChangedEffect(changed)
 
       case .livenessSweepTick:
@@ -160,16 +175,17 @@ struct AgentPresenceFeature {
         return Self.surfacesChangedEffect(ids)
 
       case .clearAttention(let surfaces):
-        let changed = Self.clearAttention(on: surfaces, into: &state)
+        let changed = Self.clearAttention(on: surfaces, now: now, into: &state)
         return Self.surfacesChangedEffect(changed)
 
       case .restoreFromSnapshot(let staged):
         guard !staged.isEmpty else { return .none }
+        let restoreNow = now
         return .run { send in
           let checked = staged.compactMapValues { stage -> RestoredRecord? in
             let alive = stage.pids.filter { Self.isAlive($0) }
             guard !alive.isEmpty else { return nil }
-            return RestoredRecord(alivePids: alive, activity: stage.activity)
+            return RestoredRecord(alivePids: alive, activity: stage.activity, activitySince: stage.activitySince ?? restoreNow)
           }
           guard !checked.isEmpty else { return }
           await send(.restoreFromSnapshotChecked(records: checked))
@@ -191,12 +207,12 @@ struct AgentPresenceFeature {
 
   /// Returns the surface IDs whose row-visible state changed, so the parent can fan
   /// out per-row `agentSnapshotChanged` deltas without inspecting `bySurface` itself.
-  private static func apply(event: AgentHookEvent, into state: inout State) -> Set<UUID> {
+  private static func apply(event: AgentHookEvent, now: Date, into state: inout State) -> Set<UUID> {
     guard let agent = SkillAgent(rawValue: event.agent) else { return [] }
     let key = PresenceKey(agent: agent, surfaceID: event.surfaceID)
     switch event.eventName {
     case .sessionStart:
-      return applySessionStart(event: event, key: key, into: &state)
+      return applySessionStart(event: event, key: key, now: now, into: &state)
     case .sessionEnd:
       if let pid = event.pid {
         guard var record = state.records[key] else { return [] }
@@ -216,15 +232,15 @@ struct AgentPresenceFeature {
       rebuildPresence(forSurface: event.surfaceID, in: &state)
       return [event.surfaceID]
     case .busy:
-      return applyActivity(.busy, event: event, key: key, into: &state) ? [event.surfaceID] : []
+      return applyActivity(.busy, event: event, key: key, now: now, into: &state) ? [event.surfaceID] : []
     case .awaitingInput:
-      return applyActivity(.awaitingInput, event: event, key: key, into: &state) ? [event.surfaceID] : []
+      return applyActivity(.awaitingInput, event: event, key: key, now: now, into: &state) ? [event.surfaceID] : []
     case .idle:
-      return applyActivity(.idle, event: event, key: key, into: &state) ? [event.surfaceID] : []
+      return applyActivity(.idle, event: event, key: key, now: now, into: &state) ? [event.surfaceID] : []
     case .error:
-      return applyActivity(.error, event: event, key: key, into: &state) ? [event.surfaceID] : []
+      return applyActivity(.error, event: event, key: key, now: now, into: &state) ? [event.surfaceID] : []
     case .compacting:
-      return applyActivity(.compacting, event: event, key: key, into: &state) ? [event.surfaceID] : []
+      return applyActivity(.compacting, event: event, key: key, now: now, into: &state) ? [event.surfaceID] : []
     case .notification, .none:
       return []
     }
@@ -235,23 +251,23 @@ struct AgentPresenceFeature {
   /// receiving surface and has no local pid to track. Either way the restart clears
   /// a sticky state, or an SSH session that errored would never recover.
   private static func applySessionStart(
-    event: AgentHookEvent, key: PresenceKey, into state: inout State
+    event: AgentHookEvent, key: PresenceKey, now: Date, into state: inout State
   ) -> Set<UUID> {
     if let pid = event.pid {
-      var record = state.records[key] ?? PresenceRecord(pids: [])
+      var record = state.records[key] ?? PresenceRecord(pids: [], activitySince: now)
       let inserted = record.pids.insert(pid).inserted
-      let cleared = Self.normalizeStickyOnRestart(&record)
+      let cleared = Self.normalizeStickyOnRestart(&record, now: now)
       state.records[key] = record
       rebuildPresence(forSurface: event.surfaceID, in: &state)
       return (inserted || cleared) ? [event.surfaceID] : []
     }
     // Pid-less OSC seed: don't clobber a record that already carries a pid.
     guard var record = state.records[key] else {
-      state.records[key] = PresenceRecord(pids: [])
+      state.records[key] = PresenceRecord(pids: [], activitySince: now)
       rebuildPresence(forSurface: event.surfaceID, in: &state)
       return [event.surfaceID]
     }
-    guard Self.normalizeStickyOnRestart(&record) else { return [] }
+    guard Self.normalizeStickyOnRestart(&record, now: now) else { return [] }
     state.records[key] = record
     rebuildPresence(forSurface: event.surfaceID, in: &state)
     return [event.surfaceID]
@@ -259,20 +275,22 @@ struct AgentPresenceFeature {
 
   /// Resets a sticky `error` / `compacting` record to `idle` on a restart.
   /// Returns whether it changed anything.
-  private static func normalizeStickyOnRestart(_ record: inout PresenceRecord) -> Bool {
+  private static func normalizeStickyOnRestart(_ record: inout PresenceRecord, now: Date) -> Bool {
     guard record.activity == .error || record.activity == .compacting else { return false }
     record.activity = .idle
+    record.activitySince = now
     return true
   }
 
   /// Resets the states parked on the user (`error`, `awaitingInput`) to `idle`
   /// on the surfaces they focused. Returns the surfaces whose record flipped.
-  private static func clearAttention(on surfaces: Set<UUID>, into state: inout State) -> Set<UUID> {
+  private static func clearAttention(on surfaces: Set<UUID>, now: Date, into state: inout State) -> Set<UUID> {
     var changed: Set<UUID> = []
     for (key, record) in state.records
     where surfaces.contains(key.surfaceID) && record.activity.isAttention {
       var updated = record
       updated.activity = .idle
+      updated.activitySince = now
       state.records[key] = updated
       changed.insert(key.surfaceID)
     }
@@ -288,7 +306,7 @@ struct AgentPresenceFeature {
   /// its per-turn `on_session_end` emits idle only (no `session_end`), so over
   /// SSH its badge clears on surface close rather than at process exit.
   private static func applyActivity(
-    _ activity: Activity, event: AgentHookEvent, key: PresenceKey, into state: inout State
+    _ activity: Activity, event: AgentHookEvent, key: PresenceKey, now: Date, into state: inout State
   ) -> Bool {
     if var record = state.records[key] {
       guard record.activity != activity else { return false }
@@ -297,11 +315,12 @@ struct AgentPresenceFeature {
       // session that just died, and would otherwise downgrade it to "waiting".
       guard record.activity != .error || activity == .busy else { return false }
       record.activity = activity
+      record.activitySince = now
       state.records[key] = record
       return true
     }
     guard event.pid == nil, activity != .idle else { return false }
-    state.records[key] = PresenceRecord(activity: activity, pids: [])
+    state.records[key] = PresenceRecord(activity: activity, pids: [], activitySince: now)
     rebuildPresence(forSurface: event.surfaceID, in: &state)
     return true
   }
@@ -353,6 +372,8 @@ struct AgentPresenceFeature {
   struct StagedRestore: Sendable {
     let pids: Set<pid_t>
     let activity: Activity
+    /// nil when the snapshot predates the field; the restore uses `now`.
+    let activitySince: Date?
   }
 
   /// Build the staged-restore dict from the persisted v2 layouts file. No
@@ -383,7 +404,7 @@ struct AgentPresenceFeature {
           guard !pids.isEmpty else { continue }
           let activity = Activity(rawValue: record.activity) ?? .idle
           staged[PresenceKey(agent: agent, surfaceID: surfaceID)] =
-            StagedRestore(pids: pids, activity: activity)
+            StagedRestore(pids: pids, activity: activity, activitySince: record.activitySince)
         }
       }
     }
@@ -410,7 +431,8 @@ struct AgentPresenceFeature {
     for (key, record) in records {
       if state.records[key] != nil { continue }
       // Restored records always have alive pids (pid-less OSC records are dropped in stageRestore).
-      state.records[key] = PresenceRecord(activity: record.activity, pids: record.alivePids)
+      state.records[key] = PresenceRecord(
+        activity: record.activity, pids: record.alivePids, activitySince: record.activitySince)
       dirtySurfaces.insert(key.surfaceID)
     }
     for surfaceID in dirtySurfaces { rebuildPresence(forSurface: surfaceID, in: &state) }
@@ -440,7 +462,8 @@ extension AgentPresenceFeature.State {
       let entry = TerminalLayoutSnapshot.SurfaceAgentRecord(
         agent: key.agent.rawValue,
         pids: record.pids.sorted(),
-        activity: record.activity.rawValue
+        activity: record.activity.rawValue,
+        activitySince: record.activitySince
       )
       result[key.surfaceID, default: []].append(entry)
     }
@@ -471,9 +494,9 @@ extension AgentPresenceFeature.State {
       surfaceIDs
       .flatMap { surfaceID -> [AgentPresenceFeature.AgentInstance] in
         (bySurface[surfaceID] ?? []).map { agent in
-          let activity =
-            records[AgentPresenceFeature.PresenceKey(agent: agent, surfaceID: surfaceID)]?.activity ?? .idle
-          return AgentPresenceFeature.AgentInstance(agent: agent, activity: activity)
+          let record = records[AgentPresenceFeature.PresenceKey(agent: agent, surfaceID: surfaceID)]
+          return AgentPresenceFeature.AgentInstance(
+            agent: agent, activity: record?.activity ?? .idle, since: record?.activitySince ?? .distantPast)
         }
       }
       .sorted { lhs, rhs in
@@ -496,14 +519,23 @@ extension AgentPresenceFeature.State {
     let surfaceSet = Set(surfaceIDs)
     var isWorking = false
     var hasError = false
+    var attentionSince: Date?
+    var workingSince: Date?
     for (key, record) in records where surfaceSet.contains(key.surfaceID) {
-      if record.activity.isWorking { isWorking = true }
+      if record.activity.isWorking {
+        isWorking = true
+        workingSince = min(workingSince ?? record.activitySince, record.activitySince)
+      }
       if record.activity == .error, badgesEnabled { hasError = true }
+      if record.activity.isAttention {
+        attentionSince = min(attentionSince ?? record.activitySince, record.activitySince)
+      }
     }
     return AgentPresenceFeature.RowSnapshot(
       agents: agents(across: surfaceSet, badgesEnabled: badgesEnabled),
       isWorking: isWorking,
-      hasError: hasError
+      hasError: hasError,
+      since: attentionSince ?? workingSince
     )
   }
 

@@ -132,7 +132,13 @@ enum SidebarBranchNesting {
     var hasNotification = false
     var seenColors: Set<RepositoryColor> = []
     var colors: [RepositoryColor] = []
-    var seenAgents: Set<AgentPresenceFeature.AgentInstance> = []
+    // Dedupe ignores `since`: two worktrees running the same agent in the same
+    // state read as one badge in the collapsed header.
+    struct AgentKey: Hashable {
+      let agent: SkillAgent
+      let activity: AgentPresenceFeature.Activity
+    }
+    var seenAgents: Set<AgentKey> = []
     var agents: [AgentPresenceFeature.AgentInstance] = []
 
     for snapshot in leafSnapshots {
@@ -147,7 +153,7 @@ enum SidebarBranchNesting {
       }
       for agent in snapshot.agents {
         if agents.count >= GroupIndicators.maxIndicators { break }
-        if seenAgents.insert(agent).inserted {
+        if seenAgents.insert(AgentKey(agent: agent.agent, activity: agent.activity)).inserted {
           agents.append(agent)
         }
       }

@@ -236,12 +236,14 @@ struct TerminalLayoutSnapshotTests {
                 TerminalLayoutSnapshot.SurfaceAgentRecord(
                   agent: "claude",
                   pids: [12345, 67890],
-                  activity: "busy"
+                  activity: "busy",
+                  activitySince: nil
                 ),
                 TerminalLayoutSnapshot.SurfaceAgentRecord(
                   agent: "codex",
                   pids: [42],
-                  activity: "idle"
+                  activity: "idle",
+                  activitySince: nil
                 ),
               ]
             )
@@ -343,7 +345,7 @@ struct TerminalLayoutSnapshotTests {
                   workingDirectory: nil,
                   agents: [
                     TerminalLayoutSnapshot.SurfaceAgentRecord(
-                      agent: "claude", pids: [1], activity: "idle"
+                      agent: "claude", pids: [1], activity: "idle", activitySince: nil
                     )
                   ]
                 )

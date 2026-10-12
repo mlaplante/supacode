@@ -70,7 +70,7 @@ struct SidebarActiveClassificationTests {
   }
   @Test func ompBadgeClassifiesRowAsAgent() {
     var state = makeState(name: "omp")
-    state.agentSnapshot.agents = [.init(agent: .omp, activity: .idle)]
+    state.agentSnapshot.agents = [.init(agent: .omp, activity: .idle, since: .distantPast)]
 
     let classification = SidebarActiveClassification.classify(state)
 
@@ -78,7 +78,7 @@ struct SidebarActiveClassificationTests {
   }
   @Test func grokBadgeClassifiesRowAsAgent() {
     var state = makeState(name: "grok")
-    state.agentSnapshot.agents = [.init(agent: .grok, activity: .idle)]
+    state.agentSnapshot.agents = [.init(agent: .grok, activity: .idle, since: .distantPast)]
 
     let classification = SidebarActiveClassification.classify(state)
 
@@ -123,7 +123,7 @@ struct SidebarActiveClassificationTests {
     var state = makeState(name: "broken")
     state.agentSnapshot.hasError = true
     state.hasUnseenNotifications = true
-    state.agentSnapshot.agents = [.init(agent: .claude, activity: .error)]
+    state.agentSnapshot.agents = [.init(agent: .claude, activity: .error, since: .distantPast)]
 
     let classification = SidebarActiveClassification.classify(state)
 
