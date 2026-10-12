@@ -1332,6 +1332,56 @@ struct SettingsFeatureAgentIntegrationTests {
 
     await store.send(.agentIntegrationChecked(.standard(.claude), .failure(unreadableProbeError)))
   }
+
+  @Test(.dependencies) func hookActivityLoadsIntoState() async {
+    let t = Date(timeIntervalSince1970: 123)
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.agentHookActivityClient.lastEventDates = { [.claude: t] }
+    }
+    store.exhaustivity = .off
+    await store.send(.refreshHookActivity)
+    await store.receive(\.hookActivityLoaded) { $0.lastHookEventAt = [.claude: t] }
+  }
+
+  @Test(.dependencies) func testEventRefreshesAfterDelay() async {
+    let clock = TestClock()
+    let t = Date(timeIntervalSince1970: 5)
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.continuousClock = clock
+      $0.agentHookActivityClient.sendTestEvent = { _ in }
+      $0.agentHookActivityClient.lastEventDates = { [.codex: t] }
+    }
+    store.exhaustivity = .off
+    await store.send(.agentSendTestEventTapped(.codex))
+    await clock.advance(by: .seconds(3))
+    await store.receive(\.refreshHookActivity)
+    await store.receive(\.hookActivityLoaded) { $0.lastHookEventAt = [.codex: t] }
+  }
+
+  @Test(.dependencies) func testEventFailureIsRecorded() async {
+    let store = TestStore(initialState: SettingsFeature.State()) {
+      SettingsFeature()
+    } withDependencies: {
+      $0.agentHookActivityClient.sendTestEvent = { _ in throw IntegrationTestError.boom }
+    }
+    store.exhaustivity = .off
+    await store.send(.agentSendTestEventTapped(.claude))
+    await store.receive(\.hookTestEventFailed) { $0.hookTestFailures = [.claude: "boom"] }
+  }
+
+  @Test func hookStatusLineVariants() {
+    let now = Date(timeIntervalSince1970: 1_000)
+    #expect(
+      AgentHookStatus.resolve(installed: .installed, lastEventAt: now.addingTimeInterval(-120), now: now)
+        == .healthy(lastEvent: "2m 0s"))
+    #expect(AgentHookStatus.resolve(installed: .installed, lastEventAt: nil, now: now) == .installedNoEvents)
+    #expect(AgentHookStatus.resolve(installed: .outdated, lastEventAt: nil, now: now) == .outdated)
+    #expect(AgentHookStatus.resolve(installed: .notInstalled, lastEventAt: nil, now: now) == .notInstalled)
+  }
 }
 
 /// Stands in for the reported incident: the settings file exists but the OS

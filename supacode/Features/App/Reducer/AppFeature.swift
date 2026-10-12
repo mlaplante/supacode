@@ -487,6 +487,7 @@ struct AppFeature {
             // card reflects external installs (e.g. `claude install`)
             // for users who keep the app open across days.
             .send(.settings(.refreshAgentIntegrationStates)),
+            .send(.settings(.refreshHookActivity)),
             // Resume background git polling only while foreground-active so an
             // idle / backgrounded app stays quiet.
             .run { _ in await worktreeInfoWatcher.send(.setActive(true)) },
@@ -2110,6 +2111,10 @@ struct AppFeature {
         return .merge(presenceEffect, ackEffect)
 
       case .terminalEvent(.agentHookEventReceived(let event)):
+        // Mirror for the settings module, which cannot see presence state.
+        if let agent = SkillAgent(rawValue: event.agent) {
+          AgentHookActivityClient.recordEvent(agent: agent, at: now)
+        }
         return .send(.agentPresence(.hookEventReceived(event)))
 
       // The user is looking at this surface, so whatever was parked on them there

@@ -246,6 +246,39 @@ private struct AgentIntegrationRow: View {
     AgentFeature.allCases.map { FeatureCapability(name: $0.title, isSupported: agent.supports($0)) }
   }
 
+  @ViewBuilder
+  private var hookStatusLine: some View {
+    if let installed = (store.agentIntegrationStates[agent] ?? .checking).lastKnownState {
+      TimelineView(.periodic(from: .now, by: 30)) { context in
+        let status = AgentHookStatus.resolve(
+          installed: installed, lastEventAt: store.lastHookEventAt[agent], now: context.date)
+        HStack(spacing: 6) {
+          Circle().fill(Self.statusColor(status)).frame(width: 7, height: 7)
+            .accessibilityHidden(true)
+          Text(status.text).appFont(.subheadline).foregroundStyle(.secondary)
+          Spacer()
+          if installed == .installed {
+            Button("Send Test Event") { store.send(.agentSendTestEventTapped(agent)) }
+              .help(
+                "Run \(agent.displayName)'s installed hook against the focused terminal to confirm events reach Supacode"
+              )
+          }
+        }
+      }
+      if let failure = store.hookTestFailures[agent] {
+        Text(failure).appFont(.subheadline).foregroundStyle(.orange)
+      }
+    }
+  }
+
+  private static func statusColor(_ status: AgentHookStatus) -> Color {
+    switch status {
+    case .healthy: .green
+    case .outdated: .orange
+    case .installedNoEvents, .notInstalled: .gray
+    }
+  }
+
   var body: some View {
     let defaultPresent = (store.agentIntegrationStates[agent] ?? .checking).isPresentOnDisk
     HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -272,6 +305,7 @@ private struct AgentIntegrationRow: View {
           }
           FeatureCapabilityGrid(capabilities: capabilities, supportedOnly: !showsAllFeatures)
         }
+        hookStatusLine
         // One line per install location, each set off by a row separator.
         ForEach(targets, id: \.self) { target in
           Divider()
