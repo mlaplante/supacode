@@ -371,6 +371,42 @@ struct MenuBarNotificationListTests {
     #expect(state.computeMenuBarSections().needsYou.isEmpty)
   }
 
+  @Test func needsYouExcludesTerminatingAndMissingRowsAndCountsMatch() {
+    let live = makeWorktree(id: "/tmp/repo/live", name: "live")
+    let dying = makeWorktree(id: "/tmp/repo/dying", name: "dying")
+    let orphan = makeWorktree(id: "/tmp/repo/orphan", name: "orphan")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [live, dying, orphan])]
+    )
+    for worktree in [live, dying, orphan] {
+      state.sidebarItems[id: worktree.id]?.agentSnapshot = .init(
+        agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
+        isWorking: false, hasError: false, since: .distantPast)
+    }
+    state.sidebarItems[id: dying.id]?.lifecycle = .deleting
+    state.sidebarItems[id: orphan.id]?.isMissing = true
+
+    #expect(state.needsYouRowIDs() == [live.id])
+    #expect(state.needsYouCount == 1)
+  }
+
+  @Test func attentionRowWithoutStampIsIncludedAndSortsLast() {
+    let stamped = makeWorktree(id: "/tmp/repo/stamped", name: "stamped")
+    let bare = makeWorktree(id: "/tmp/repo/bare", name: "bare")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [stamped, bare])]
+    )
+    state.sidebarItems[id: stamped.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .awaitingInput, since: Date(timeIntervalSince1970: 500))],
+      isWorking: false, hasError: false, since: Date(timeIntervalSince1970: 500))
+    state.sidebarItems[id: bare.id]?.agentSnapshot = .init(
+      agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
+      isWorking: false, hasError: false, since: nil)
+    state.reconcileSidebarForTesting()
+
+    #expect(state.needsYouRowIDs() == [stamped.id, bare.id])
+  }
+
   @Test func postReduceHookRefreshesTheCache() {
     let worktree = makeWorktree(id: "/tmp/repo/wt", name: "wt")
     var state = RepositoriesFeature.State(

@@ -819,20 +819,23 @@ extension RepositoriesFeature.State {
   /// missing and terminating rows are excluded. Feeds the menu bar's Needs You
   /// section and `jumpToNextAwaiting`.
   func needsYouRowIDs() -> [Worktree.ID] {
-    let archived = archivedWorktreeIDSet
-    return sidebarItems
-      .filter { row in
-        !archived.contains(row.id) && !row.isMissing && !row.lifecycle.isTerminating
-          && row.agents.contains(where: { $0.activity.isAttention })
-      }
+    needsYouRows()
       .sorted { lhs, rhs in
-        let left = lhs.agentSnapshot.since ?? .distantFuture
-        let right = rhs.agentSnapshot.since ?? .distantFuture
-        if left != right { return left < right }
+        if lhs.attentionSince != rhs.attentionSince { return lhs.attentionSince < rhs.attentionSince }
         return SidebarHighlightOrdering.branchNameOrdersBefore(
           lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
       }
       .map(\.id)
+  }
+
+  /// Count-only twin of `needsYouRowIDs()` for hot paths: filters, never sorts.
+  var needsYouCount: Int { needsYouRows().count }
+
+  private func needsYouRows() -> [SidebarItemFeature.State] {
+    let archived = archivedWorktreeIDSet
+    return sidebarItems.filter { row in
+      row.needsAttention && !row.isMissing && !row.lifecycle.isTerminating && !archived.contains(row.id)
+    }
   }
 
   /// Hoisted-row payload for one highlight-hoist pass (the sidebar structure
@@ -1145,7 +1148,7 @@ extension RepositoriesFeature.State {
           branchName: state.branchName,
           isNotified: state.hasUnseenNotifications,
           classification: SidebarActiveClassification.classify(state),
-          attentionSince: state.agents.contains(where: { $0.activity.isAttention }) ? state.agentSnapshot.since : nil
+          attentionSince: state.needsAttention ? state.attentionSince : nil
         )
       )
     }

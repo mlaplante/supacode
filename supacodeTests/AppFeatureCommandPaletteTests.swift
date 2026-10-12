@@ -127,6 +127,19 @@ struct AppFeatureCommandPaletteTests {
     }
   }
 
+  @Test(.dependencies) func jumpToNextAwaitingDelegateRoutesToJump() async {
+    let store = TestStore(initialState: AppFeature.State()) {
+      AppFeature()
+    } withDependencies: {
+      $0.terminalClient.send = { _ in }
+    }
+    store.exhaustivity = .off
+
+    await store.send(.commandPalette(.delegate(.jumpToNextAwaiting)))
+    await store.receive(\.jumpToNextAwaiting)
+    await store.finish()
+  }
+
   @Test(.dependencies) func checkForUpdatesDispatchesUpdateAction() async {
     let store = TestStore(initialState: AppFeature.State()) {
       AppFeature()

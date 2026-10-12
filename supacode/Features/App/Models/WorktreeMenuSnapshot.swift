@@ -41,7 +41,7 @@ extension AppFeature.State {
       selectedPullRequestURL: pullRequestURL,
       hasSelectedGitWorktree: repositories.selectedWorktreeSlice.map { !$0.isFolder } ?? false,
       notificationIndicatorCount: notificationIndicatorCount,
-      needsYouCount: repositories.needsYouRowIDs().count
+      needsYouCount: repositories.needsYouCount
     )
   }
 

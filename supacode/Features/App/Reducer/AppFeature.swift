@@ -1830,6 +1830,9 @@ struct AppFeature {
       case .commandPalette(.delegate(.viewArchivedWorktrees)):
         return .send(.repositories(.selectArchivedWorktrees))
 
+      case .commandPalette(.delegate(.jumpToNextAwaiting)):
+        return .send(.jumpToNextAwaiting)
+
       case .commandPalette(.delegate(.refreshWorktrees)):
         return .send(.refreshWorktreesRequested)
 

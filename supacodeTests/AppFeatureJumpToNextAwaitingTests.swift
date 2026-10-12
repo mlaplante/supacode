@@ -55,6 +55,28 @@ struct AppFeatureJumpToNextAwaitingTests {
     )
   }
 
+  @Test(.dependencies) func rowLeavesTheQueueOnceItsSurfaceIsFocused() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt-1", name: "wt-1")
+    let surface = UUID()
+    let store = makeStore(
+      worktrees: [worktree],
+      awaiting: [(worktree, surface, Date(timeIntervalSince1970: 100))]
+    ) { values in
+      values.date = .constant(Date(timeIntervalSince1970: 1_000))
+      values.continuousClock = ImmediateClock()
+      values.terminalClient.saveLayoutsWithAgents = { _ in }
+    }
+    #expect(store.state.repositories.needsYouRowIDs() == [worktree.id])
+
+    await store.send(.agentPresence(.clearAttention(surfaces: [surface])))
+    await store.skipReceivedActions()
+    await store.finish()
+    #expect(store.state.agentPresence.records.values.allSatisfy { !$0.activity.isAttention })
+
+    #expect(store.state.repositories.needsYouRowIDs().isEmpty)
+    #expect(store.state.repositories.needsYouCount == 0)
+  }
+
   // MARK: - Helpers.
 
   private func makeWorktree(id: String, name: String) -> Worktree {

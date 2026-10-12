@@ -63,6 +63,7 @@ struct CommandPaletteFeature {
     case customizeRepositoryAppearance(Repository.ID)
     case customizeWorktreeAppearance(Worktree.ID, Repository.ID)
     case viewArchivedWorktrees
+    case jumpToNextAwaiting
     case refreshWorktrees
     case ghosttyCommand(String)
     case toggleWindowMode
@@ -267,6 +268,12 @@ struct CommandPaletteFeature {
         title: "View Archived Worktrees",
         subtitle: nil,
         kind: .viewArchivedWorktrees
+      ),
+      CommandPaletteItem(
+        id: CommandPaletteItemID.globalJumpToNextAwaiting,
+        title: "Jump to Next Awaiting Agent",
+        subtitle: nil,
+        kind: .jumpToNextAwaiting
       ),
     ]
   }
@@ -753,6 +760,7 @@ private enum CommandPaletteItemID {
   static let globalNewWorktree = "global.new-worktree"
   static let globalRefreshWorktrees = "global.refresh-worktrees"
   static let globalViewArchivedWorktrees = "global.view-archived-worktrees"
+  static let globalJumpToNextAwaiting = "global.jump-to-next-awaiting"
   static let toggleWindowMode = "worktree.toggle-window-mode"
 
   static func layoutCommand(_ command: LayoutPaletteCommand) -> CommandPaletteItem.ID {
@@ -768,6 +776,7 @@ private enum CommandPaletteItemID {
       globalNewWorktree,
       globalRefreshWorktrees,
       globalViewArchivedWorktrees,
+      globalJumpToNextAwaiting,
     ]
   }
 
@@ -900,6 +909,8 @@ private func delegateAction(for kind: CommandPaletteItem.Kind) -> CommandPalette
     return selectedEntryDelegateAction(for: kind)!
   case .viewArchivedWorktrees:
     return .viewArchivedWorktrees
+  case .jumpToNextAwaiting:
+    return .jumpToNextAwaiting
   case .refreshWorktrees:
     return .refreshWorktrees
   case .ghosttyCommand(let action):
@@ -940,7 +951,7 @@ private func selectedEntryDelegateAction(
   case .layoutCommand(let command):
     return .layoutCommand(command)
   case .checkForUpdates, .openRepository, .addRemoteRepository, .worktreeSelect, .openSettings,
-    .newWorktree, .removeWorktree, .archiveWorktree, .viewArchivedWorktrees, .refreshWorktrees,
+    .newWorktree, .removeWorktree, .archiveWorktree, .viewArchivedWorktrees, .jumpToNextAwaiting, .refreshWorktrees,
     .ghosttyCommand, .openPullRequest, .markPullRequestReady, .mergePullRequest,
     .closePullRequest, .copyFailingJobURL, .copyCiFailureLogs, .rerunFailedJobs,
     .openFailingCheckDetails, .runScript, .stopScript:
@@ -998,6 +1009,7 @@ private func pullRequestDelegateAction(
     .customizeRepositoryAppearance,
     .customizeWorktreeAppearance,
     .viewArchivedWorktrees,
+    .jumpToNextAwaiting,
     .refreshWorktrees,
     .ghosttyCommand,
     .toggleWindowMode,
