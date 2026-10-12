@@ -21,6 +21,30 @@ struct SidebarItemFeatureTests {
     await store.send(.diffStatsChanged(added: 3, removed: 1))
   }
 
+  @Test func aheadBehindChangeNormalizesZeroBehindAndNoOpsOnRepeat() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.aheadBehindChanged(ahead: 2, behind: 4, base: "origin/main")) {
+      $0.aheadCount = 2
+      $0.behindCount = 4
+      $0.syncBaseRef = "origin/main"
+    }
+    await store.send(.aheadBehindChanged(ahead: 2, behind: 4, base: "origin/main"))
+    await store.send(.aheadBehindChanged(ahead: 2, behind: 0, base: "origin/main")) {
+      $0.behindCount = nil
+    }
+  }
+
+  @Test func syncStateChangeIsEqualityGuarded() async {
+    let store = TestStore(initialState: makeState(name: "feature")) {
+      SidebarItemFeature()
+    }
+    await store.send(.syncStateChanged(true)) { $0.isSyncing = true }
+    await store.send(.syncStateChanged(true))
+    await store.send(.syncStateChanged(false)) { $0.isSyncing = false }
+  }
+
   @Test func lifecycleEqualityGuardSkipsNoOps() async {
     var state = makeState(name: "feature")
     state.lifecycle = .archiving
