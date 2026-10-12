@@ -180,12 +180,12 @@ struct AgentPresenceFeature {
 
       case .restoreFromSnapshot(let staged):
         guard !staged.isEmpty else { return .none }
-        let now = now
+        let restoreNow = now
         return .run { send in
           let checked = staged.compactMapValues { stage -> RestoredRecord? in
             let alive = stage.pids.filter { Self.isAlive($0) }
             guard !alive.isEmpty else { return nil }
-            return RestoredRecord(alivePids: alive, activity: stage.activity, activitySince: stage.activitySince ?? now)
+            return RestoredRecord(alivePids: alive, activity: stage.activity, activitySince: stage.activitySince ?? restoreNow)
           }
           guard !checked.isEmpty else { return }
           await send(.restoreFromSnapshotChecked(records: checked))

@@ -432,6 +432,19 @@ struct SidebarBranchNestingTests {
     #expect(indicators.agents == Array(agents.prefix(3)))
   }
 
+  @Test func aggregatedIndicators_dedupesAgentsIgnoringSince() {
+    let early = AgentPresenceFeature.AgentInstance(
+      agent: .claude, activity: .busy, since: Date(timeIntervalSince1970: 100))
+    let late = AgentPresenceFeature.AgentInstance(
+      agent: .claude, activity: .busy, since: Date(timeIntervalSince1970: 200))
+    let snapshots: [SidebarBranchNesting.LeafIndicatorSnapshot] = [
+      .init(hasUnseenNotifications: false, runningScriptColors: [], agents: [early]),
+      .init(hasUnseenNotifications: false, runningScriptColors: [], agents: [late]),
+    ]
+    let indicators = SidebarBranchNesting.aggregateIndicators(from: snapshots)
+    #expect(indicators.agents == [early])
+  }
+
   // MARK: - ancestorPrefixes.
 
   @Test func ancestorPrefixes_returnsAllButLast() {
