@@ -74,6 +74,7 @@ public struct SettingsFeature {
     public var automatedActionPolicy: AutomatedActionPolicy
     public var defaultWorktreeBaseDirectoryPath: String
     public var autoDeleteArchivedWorktreesAfterDays: AutoDeletePeriod?
+    public var staleWorktreeAfterDays: Int
     public var shortcutOverrides: [AppShortcutID: AppShortcutOverride]
     public var globalScripts: [ScriptDefinition]
     public var openFileScript: String
@@ -214,6 +215,7 @@ public struct SettingsFeature {
       ghosttyUserConfigMode = settings.ghosttyUserConfigMode
       automatedActionPolicy = settings.automatedActionPolicy
       autoDeleteArchivedWorktreesAfterDays = settings.autoDeleteArchivedWorktreesAfterDays
+      staleWorktreeAfterDays = settings.staleWorktreeAfterDays
       shortcutOverrides = settings.shortcutOverrides
       globalScripts = settings.globalScripts
       openFileScript = settings.openFileScript
@@ -470,6 +472,7 @@ public struct SettingsFeature {
         state.ghosttyUserConfigMode = normalizedSettings.ghosttyUserConfigMode
         state.automatedActionPolicy = normalizedSettings.automatedActionPolicy
         state.autoDeleteArchivedWorktreesAfterDays = normalizedSettings.autoDeleteArchivedWorktreesAfterDays
+        state.staleWorktreeAfterDays = normalizedSettings.staleWorktreeAfterDays
         state.shortcutOverrides = normalizedSettings.shortcutOverrides
         state.globalScripts = normalizedSettings.globalScripts
         state.openFileScript = normalizedSettings.openFileScript
@@ -1254,6 +1257,7 @@ extension SettingsFeature.State {
     settings.defaultWorktreeBaseDirectoryPath =
       SupacodePaths.normalizedWorktreeBaseDirectoryPath(defaultWorktreeBaseDirectoryPath)
     settings.autoDeleteArchivedWorktreesAfterDays = autoDeleteArchivedWorktreesAfterDays
+    settings.staleWorktreeAfterDays = staleWorktreeAfterDays
     settings.shortcutOverrides = shortcutOverrides
     settings.globalScripts = globalScripts
     settings.openFileScript = openFileScript

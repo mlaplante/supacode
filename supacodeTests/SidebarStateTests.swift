@@ -416,6 +416,66 @@ struct SidebarStateTests {
     #expect(decoded.color == nil)
   }
 
+  @Test func itemRoundTripPreservesLastFocusedAt() throws {
+    let stamp = Date(timeIntervalSinceReferenceDate: 1_700_000_000)
+    let encoded = try JSONEncoder().encode(SidebarState.Item(lastFocusedAt: stamp))
+    let decoded = try JSONDecoder().decode(SidebarState.Item.self, from: encoded)
+    #expect(decoded.lastFocusedAt == stamp)
+  }
+
+  @Test func itemDecodingWithoutLastFocusedAtYieldsNil() throws {
+    let decoded = try JSONDecoder().decode(SidebarState.Item.self, from: Data(#"{ "title": "Old" }"#.utf8))
+    #expect(decoded.lastFocusedAt == nil)
+  }
+
+  // MARK: - touch.
+
+  private func touchFixture() -> SidebarState {
+    var state = SidebarState()
+    state.sections[repoA] = .init(buckets: [.unpinned: .init(items: ["/tmp/wt": .init()])])
+    return state
+  }
+
+  @Test func touchStampsAnUnstampedRow() {
+    var state = touchFixture()
+    let now = Date(timeIntervalSince1970: 10_000)
+    let changed = state.touch(worktree: "/tmp/wt", in: repoA, at: now)
+    #expect(changed)
+    #expect(state.lastFocusedAt(for: "/tmp/wt") == now)
+  }
+
+  @Test func touchWithinMinimumIntervalLeavesTheStampAlone() {
+    var state = touchFixture()
+    let first = Date(timeIntervalSince1970: 10_000)
+    state.touch(worktree: "/tmp/wt", in: repoA, at: first)
+    let later = first.addingTimeInterval(60)
+    #expect(!state.needsTouch(worktree: "/tmp/wt", at: later))
+    let changed = state.touch(worktree: "/tmp/wt", in: repoA, at: later)
+    #expect(!changed)
+    #expect(state.lastFocusedAt(for: "/tmp/wt") == first)
+  }
+
+  @Test func touchAfterMinimumIntervalRestamps() {
+    var state = touchFixture()
+    let first = Date(timeIntervalSince1970: 10_000)
+    state.touch(worktree: "/tmp/wt", in: repoA, at: first)
+    let later = first.addingTimeInterval(16 * 60)
+    #expect(SidebarState.touchMinimumInterval < 16 * 60)
+    #expect(state.needsTouch(worktree: "/tmp/wt", at: later))
+    let changed = state.touch(worktree: "/tmp/wt", in: repoA, at: later)
+    #expect(changed)
+    #expect(state.lastFocusedAt(for: "/tmp/wt") == later)
+  }
+
+  @Test func touchOnMissingRowIsANoop() {
+    var state = touchFixture()
+    let otherWorktree = state.touch(worktree: "/tmp/other", in: repoA, at: Date())
+    #expect(!otherWorktree)
+    let otherRepo = state.touch(worktree: "/tmp/wt", in: repoB, at: Date())
+    #expect(!otherRepo)
+    #expect(state.lastFocusedAt(for: "/tmp/wt") == nil)
+  }
+
   // MARK: - Archive / unarchive customization carry.
 
   @Test func archiveCarriesTitleAndColorFromSourceBucket() {

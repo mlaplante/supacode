@@ -2155,7 +2155,14 @@ struct AppFeature {
         if let agent = SkillAgent(rawValue: event.agent) {
           AgentHookActivityClient.recordEvent(agent: agent, at: now)
         }
-        return .send(.agentPresence(.hookEventReceived(event)))
+        var effects: [Effect<Action>] = [.send(.agentPresence(.hookEventReceived(event)))]
+        // Only busy / session-start count as use; keeps the persisted sidebar write rare.
+        if let name = AgentHookEvent.EventName(rawValue: event.event), name == .busy || name == .sessionStart,
+          let itemID = state.repositories.surfaceToItemID[event.surfaceID]
+        {
+          effects.append(.send(.repositories(.worktreeTouched(itemID))))
+        }
+        return .merge(effects)
 
       // The user is looking at this surface, so whatever was parked on them there
       // is acknowledged. Scoped to the focused surface, so a broken session in

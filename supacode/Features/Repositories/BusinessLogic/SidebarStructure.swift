@@ -519,6 +519,10 @@ extension RepositoriesFeature.Action {
     case .resolveOpenActions, .openActionsResolved:
       return []
 
+    // Stamps `lastFocusedAt` only; nothing a cached sidebar projection reads.
+    case .worktreeTouched:
+      return []
+
     // The flush applies the parked bits itself inside the post-reduce hook.
     case .flushCoalescedCacheRecomputes:
       return []

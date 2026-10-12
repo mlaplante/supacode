@@ -144,6 +144,8 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
   public var ghosttyUserConfigMode: GhosttyUserConfigMode
   public var automatedActionPolicy: AutomatedActionPolicy
   public var autoDeleteArchivedWorktreesAfterDays: AutoDeletePeriod?
+  /// Days without use before a worktree is flagged stale. 0 turns the idle rule off.
+  public var staleWorktreeAfterDays: Int
   public var shortcutOverrides: [AppShortcutID: AppShortcutOverride]
   /// Scripts shared across every repository. Always `.custom` kind.
   public var globalScripts: [ScriptDefinition]
@@ -214,6 +216,7 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     automatedActionPolicy: .cliOnly,
     defaultWorktreeBaseDirectoryPath: nil,
     autoDeleteArchivedWorktreesAfterDays: nil,
+    staleWorktreeAfterDays: 7,
     shortcutOverrides: [:],
     globalScripts: [],
     openFileScript: "",
@@ -259,6 +262,7 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     automatedActionPolicy: AutomatedActionPolicy = .cliOnly,
     defaultWorktreeBaseDirectoryPath: String? = nil,
     autoDeleteArchivedWorktreesAfterDays: AutoDeletePeriod? = nil,
+    staleWorktreeAfterDays: Int = 7,
     shortcutOverrides: [AppShortcutID: AppShortcutOverride] = [:],
     globalScripts: [ScriptDefinition] = [],
     openFileScript: String = "",
@@ -306,6 +310,7 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     self.automatedActionPolicy = automatedActionPolicy
     self.defaultWorktreeBaseDirectoryPath = defaultWorktreeBaseDirectoryPath
     self.autoDeleteArchivedWorktreesAfterDays = autoDeleteArchivedWorktreesAfterDays
+    self.staleWorktreeAfterDays = staleWorktreeAfterDays
     self.shortcutOverrides = shortcutOverrides
     self.globalScripts = globalScripts
     self.openFileScript = openFileScript
@@ -464,6 +469,9 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
       (try container.decodeIfPresent(Int.self, forKey: .autoDeleteArchivedWorktreesAfterDays))
       .flatMap(AutoDeletePeriod.init(rawValue:))
       ?? Self.default.autoDeleteArchivedWorktreesAfterDays
+    staleWorktreeAfterDays =
+      try container.decodeIfPresent(Int.self, forKey: .staleWorktreeAfterDays)
+      ?? Self.default.staleWorktreeAfterDays
     shortcutOverrides =
       try container.decodeIfPresent([AppShortcutID: AppShortcutOverride].self, forKey: .shortcutOverrides)
       ?? Self.default.shortcutOverrides
