@@ -9492,6 +9492,88 @@ struct RepositoriesFeatureTests {
     #expect(store.state.sidebar.lastFocusedAt(for: worktree.id) == now)
   }
 
+  @Test func selectingWorktreeStampsEvenWithinTheHookThrottle() async {
+    let first = Date(timeIntervalSince1970: 4_000)
+    let (store, worktree) = makeLastFocusedStore(now: first)
+    await store.send(.worktreeTouched(worktree.id))
+    let soon = first.addingTimeInterval(60)
+    store.dependencies.date = .constant(soon)
+    await store.send(.selectWorktree(worktree.id, focusTerminal: false))
+    #expect(store.state.sidebar.lastFocusedAt(for: worktree.id) == soon)
+  }
+
+  @Test func hookTouchWithinTheThrottleDoesNotRestamp() async {
+    let first = Date(timeIntervalSince1970: 4_000)
+    let (store, worktree) = makeLastFocusedStore(now: first)
+    await store.send(.worktreeTouched(worktree.id))
+    store.dependencies.date = .constant(first.addingTimeInterval(60))
+    await store.send(.worktreeTouched(worktree.id))
+    #expect(store.state.sidebar.lastFocusedAt(for: worktree.id) == first)
+  }
+
+  @Test func hookTouchReordersOnlyRecentActivitySections() async {
+    let now = Date(timeIntervalSince1970: 4_000)
+    let (store, worktree) = makeLastFocusedStore(now: now)
+    await store.send(.worktreeTouched(worktree.id))
+    await store.finish()
+    // Manual sort: the stamp moved nothing visible, so no structure follow-up.
+    store.dependencies.date = .constant(now.addingTimeInterval(SidebarState.touchMinimumInterval + 1))
+    let repositoryID = store.state.repositories.first!.id
+    store.state.$sidebar.withLock { $0.sections[repositoryID, default: .init()].worktreeSort = .recentActivity }
+    await store.send(.worktreeTouched(worktree.id))
+    await store.receive(\.worktreeTouchReordered)
+  }
+
+  @Test func selectingMovesTheRowToTheTopOfARecentActivityTail() async {
+    let repoRoot = "/tmp/repo"
+    let alpha = makeWorktree(id: "/tmp/repo/alpha", name: "alpha", repoRoot: repoRoot)
+    let beta = makeWorktree(id: "/tmp/repo/beta", name: "beta", repoRoot: repoRoot)
+    let repository = makeRepository(id: repoRoot, worktrees: [alpha, beta])
+    var state = makeState(repositories: [repository])
+    state.$sidebar.withLock { sidebar in
+      sidebar.sections[repository.id] = .init(
+        buckets: [
+          .unpinned: .init(items: [
+            alpha.id: .init(lastFocusedAt: Date(timeIntervalSince1970: 3_990)),
+            beta.id: .init(lastFocusedAt: Date(timeIntervalSince1970: 3_000)),
+          ])
+        ],
+        worktreeSort: .recentActivity
+      )
+    }
+    state.reconcileSidebarForTesting()
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    }
+    // Within the hook throttle of alpha's stamp; selection must still stamp.
+    store.dependencies.date = .constant(Date(timeIntervalSince1970: 4_000))
+    store.exhaustivity = .off
+    await store.send(.selectWorktree(beta.id, focusTerminal: false))
+    let groups = SidebarItemGroup.computeSlots(
+      in: store.state, repositoryID: repository.id, pendingIDs: [], hoistedRowIDs: [], nestWorktreesByBranch: false)
+    #expect(groups.first { $0.slot == .unpinnedTail }?.rowIDs == [beta.id, alpha.id])
+  }
+
+  @Test func reconcileStampsNilLastFocusedAtOnceWithTheCurrentTime() {
+    let repoRoot = "/tmp/repo"
+    let main = makeWorktree(id: repoRoot, name: "main", repoRoot: repoRoot)
+    let old = makeWorktree(id: "/tmp/repo/old", name: "old", repoRoot: repoRoot)
+    let fresh = makeWorktree(id: "/tmp/repo/fresh", name: "fresh", repoRoot: repoRoot)
+    let repository = makeRepository(id: repoRoot, worktrees: [main, old, fresh])
+    var state = makeState(repositories: [repository])
+    let stamped = Date(timeIntervalSince1970: 100)
+    state.$sidebar.withLock { sidebar in
+      sidebar.sections[repository.id] = .init(
+        buckets: [.unpinned: .init(items: [old.id: .init(), fresh.id: .init(lastFocusedAt: stamped)])]
+      )
+    }
+    let now = Date(timeIntervalSince1970: 9_000)
+    state.reconcileSidebarState(roots: [repository.rootURL], pruneLivenessAgainstRoster: true, now: now)
+    #expect(state.sidebar.lastFocusedAt(for: old.id) == now)
+    #expect(state.sidebar.lastFocusedAt(for: fresh.id) == stamped)
+    #expect(state.sidebar.lastFocusedAt(for: main.id) == nil)
+  }
+
   @Test func worktreeTouchedWithoutSidebarRowStampsNothing() async {
     let worktree = makeWorktree(id: "/tmp/repo/wt", name: "wt", repoRoot: "/tmp/repo")
     let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
@@ -12568,7 +12650,9 @@ struct RepositoriesFeatureTests {
     configure: @escaping (inout DependencyValues) -> Void = { _ in }
   ) -> (TestStoreOf<RepositoriesFeature>, Worktree) {
     let main = makeWorktree(id: "/tmp/repo", name: "main")
-    let worktree = makeWorktree(id: "/tmp/repo/feature", name: "feature")
+    // Created ~2 days before the constant clock below: past the `empty` grace period, short of idle.
+    let worktree = makeWorktree(
+      id: "/tmp/repo/feature", name: "feature", createdAt: Date(timeIntervalSince1970: 9_800_000))
     let repository = makeRepository(id: "/tmp/repo", worktrees: [main, worktree])
     var initialState = makeState(repositories: [repository])
     initialState.selection = .worktree(main.id)
@@ -12577,6 +12661,7 @@ struct RepositoriesFeatureTests {
       RepositoriesFeature()
     } withDependencies: {
       $0.sidebarStructureAutoRecompute = false
+      $0.date = .constant(Date(timeIntervalSince1970: 10_000_000))
       // Every ahead/behind load now probes tree cleanliness for stale classification.
       $0.gitClient.fileStatus = { _ in .empty }
       configure(&$0)
@@ -12626,6 +12711,24 @@ struct RepositoriesFeatureTests {
       $0.gitClient.fileStatus = { _ in
         GitStatusSnapshot(statuses: ["a.txt": GitFileStatus(index: nil, worktree: .modified)])
       }
+      $0.gitClient.rebaseOnto = { _, _ in rebased.setValue(true) }
+    }
+    await store.send(
+      .sidebarItems(
+        .element(id: worktree.id, action: .aheadBehindChanged(ahead: 1, behind: 3, base: "origin/main"))))
+    await store.send(.syncWorktreeWithBase(worktreeID: worktree.id, operation: .rebase))
+    await store.receive(\.syncWorktreeFinished)
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(!rebased.value)
+    #expect(store.state.alert != nil)
+    #expect(store.state.sidebarItems[id: worktree.id]?.isSyncing == false)
+  }
+
+  @Test func syncWithUnreadableStatusFailsClosedAndSkipsRebase() async {
+    let rebased = LockIsolated(false)
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.fileStatus = { _ in nil }
       $0.gitClient.rebaseOnto = { _, _ in rebased.setValue(true) }
     }
     await store.send(

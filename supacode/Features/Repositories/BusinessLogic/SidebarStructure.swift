@@ -104,16 +104,18 @@ enum SidebarHighlightOrdering {
     return
       included
       .sorted { lhs, rhs in
-        if prioritizeNotified, lhs.isNotified != rhs.isNotified {
-          return lhs.isNotified
-        }
-        // Rows parked on the user lead, longest wait first.
+        // Rows parked on the user lead, longest wait first; then notified rows (when
+        // prioritized); then alphabetical.
         switch (lhs.attentionSince, rhs.attentionSince) {
         case (let left?, let right?) where left != right: return left < right
         case (.some, .none): return true
         case (.none, .some): return false
-        default: return branchNameOrdersBefore(lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
+        default: break
         }
+        if prioritizeNotified, lhs.isNotified != rhs.isNotified {
+          return lhs.isNotified
+        }
+        return branchNameOrdersBefore(lhs.branchName, id: lhs.id, rhs.branchName, id: rhs.id)
       }
       .map(\.id)
   }
@@ -527,6 +529,10 @@ extension RepositoriesFeature.Action {
     // Stamps `lastFocusedAt` only; nothing a cached sidebar projection reads.
     case .worktreeTouched:
       return []
+
+    // A stamp changed a `.recentActivity` section's order.
+    case .worktreeTouchReordered:
+      return .sidebarStructure
 
     // The flush applies the parked bits itself inside the post-reduce hook.
     case .flushCoalescedCacheRecomputes:
@@ -1340,7 +1346,7 @@ extension SidebarItemGroup {
   static func agentRank(_ row: SidebarItemFeature.State?) -> Int {
     guard let row else { return 4 }
     if row.hasAgentError { return 0 }
-    if row.hasAgentAwaitingInput { return 1 }
+    if row.hasAgentAwaitingInput || row.needsAttention { return 1 }
     if row.hasAgentActivity { return 2 }
     if !row.agents.isEmpty { return 3 }
     return 4

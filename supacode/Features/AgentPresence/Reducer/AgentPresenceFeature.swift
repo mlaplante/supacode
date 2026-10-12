@@ -48,6 +48,9 @@ struct AgentPresenceFeature {
     var agents: [AgentInstance] = []
     var isWorking = false
     var hasError = false
+    /// Any agent on the row's surfaces is awaiting input or errored. Derived from the
+    /// records, so it holds with badges off (`agents` is empty then).
+    var hasAttention = false
     /// Earliest `since` among attention-state agents, else among working agents,
     /// else nil. The row shows elapsed time off this; the queue orders by it.
     var since: Date?
@@ -116,10 +119,6 @@ struct AgentPresenceFeature {
     /// Per-surface agent presence. A surface can host multiple agents (rare,
     /// but possible if e.g. Claude spawns Codex). Order not guaranteed; sort before display.
     var bySurface: [UUID: Set<SkillAgent>] = [:]
-    /// Wall-clock of the last hook event per agent, stamped on every
-    /// `hookEventReceived` whether or not activity changed. Not persisted; the
-    /// settings health check reads it through `AgentHookActivityClient`.
-    var lastEventAt: [SkillAgent: Date] = [:]
   }
 
   /// Period between liveness sweeps. Cost scales with active sessions, not
@@ -136,7 +135,6 @@ struct AgentPresenceFeature {
         return .none
 
       case .hookEventReceived(let event):
-        if let agent = SkillAgent(rawValue: event.agent) { state.lastEventAt[agent] = now }
         let changed = Self.apply(event: event, now: now, into: &state)
         return Self.surfacesChangedEffect(changed)
 
@@ -185,7 +183,8 @@ struct AgentPresenceFeature {
           let checked = staged.compactMapValues { stage -> RestoredRecord? in
             let alive = stage.pids.filter { Self.isAlive($0) }
             guard !alive.isEmpty else { return nil }
-            return RestoredRecord(alivePids: alive, activity: stage.activity, activitySince: stage.activitySince ?? restoreNow)
+            return RestoredRecord(
+              alivePids: alive, activity: stage.activity, activitySince: stage.activitySince ?? restoreNow)
           }
           guard !checked.isEmpty else { return }
           await send(.restoreFromSnapshotChecked(records: checked))
@@ -519,6 +518,7 @@ extension AgentPresenceFeature.State {
     let surfaceSet = Set(surfaceIDs)
     var isWorking = false
     var hasError = false
+    var hasAttention = false
     var attentionSince: Date?
     var workingSince: Date?
     for (key, record) in records where surfaceSet.contains(key.surfaceID) {
@@ -528,6 +528,7 @@ extension AgentPresenceFeature.State {
       }
       if record.activity == .error, badgesEnabled { hasError = true }
       if record.activity.isAttention {
+        hasAttention = true
         attentionSince = min(attentionSince ?? record.activitySince, record.activitySince)
       }
     }
@@ -535,6 +536,7 @@ extension AgentPresenceFeature.State {
       agents: agents(across: surfaceSet, badgesEnabled: badgesEnabled),
       isWorking: isWorking,
       hasError: hasError,
+      hasAttention: hasAttention,
       since: attentionSince ?? workingSince
     )
   }

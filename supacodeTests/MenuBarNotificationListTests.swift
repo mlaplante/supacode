@@ -136,6 +136,28 @@ struct MenuBarNotificationListTests {
     }
   }
 
+  @Test func pinnedRowThatNeedsYouIsListedOnlyUnderNeedsYou() {
+    withDependencies {
+      $0.defaultAppStorage = .inMemory
+    } operation: {
+      let pinned = makeWorktree(id: "/tmp/repo/pinned", name: "pinned")
+      var state = RepositoriesFeature.State(
+        reconciledRepositories: [makeRepository(worktrees: [pinned])]
+      )
+      state.$sidebar.withLock { sidebar in
+        sidebar.insert(worktree: pinned.id, in: Repository.ID("/tmp/repo/"), bucket: .pinned)
+      }
+      state.sidebarItems[id: pinned.id]?.agentSnapshot = .init(
+        agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
+        isWorking: false, hasError: false, hasAttention: true, since: Date(timeIntervalSince1970: 5))
+      state.reconcileSidebarForTesting()
+
+      let sections = state.computeMenuBarSections()
+      #expect(sections.needsYou == [pinned.id])
+      #expect(sections.pinned.isEmpty)
+    }
+  }
+
   @Test func doesNotDuplicateAnActiveOrPinnedRowIntoUnreadWhenGroupingOff() {
     withDependencies {
       $0.defaultAppStorage = .inMemory
@@ -333,10 +355,10 @@ struct MenuBarNotificationListTests {
     let early = Date(timeIntervalSince1970: 100)
     state.sidebarItems[id: rowA.id]?.agentSnapshot = .init(
       agents: [.init(agent: .claude, activity: .awaitingInput, since: late)],
-      isWorking: false, hasError: false, since: late)
+      isWorking: false, hasError: false, hasAttention: true, since: late)
     state.sidebarItems[id: rowB.id]?.agentSnapshot = .init(
       agents: [.init(agent: .codex, activity: .error, since: early)],
-      isWorking: false, hasError: true, since: early)
+      isWorking: false, hasError: true, hasAttention: true, since: early)
     state.reconcileSidebarForTesting()
 
     let sections = state.computeMenuBarSections()
@@ -357,7 +379,7 @@ struct MenuBarNotificationListTests {
       isWorking: true, hasError: false, since: .distantPast)
     state.sidebarItems[id: rowB.id]?.agentSnapshot = .init(
       agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
-      isWorking: false, hasError: false, since: .distantPast)
+      isWorking: false, hasError: false, hasAttention: true, since: .distantPast)
     state.$sidebar.withLock { sidebar in
       sidebar.insert(
         worktree: rowB.id,
@@ -381,7 +403,7 @@ struct MenuBarNotificationListTests {
     for worktree in [live, dying, orphan] {
       state.sidebarItems[id: worktree.id]?.agentSnapshot = .init(
         agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
-        isWorking: false, hasError: false, since: .distantPast)
+        isWorking: false, hasError: false, hasAttention: true, since: .distantPast)
     }
     state.sidebarItems[id: dying.id]?.lifecycle = .deleting
     state.sidebarItems[id: orphan.id]?.isMissing = true
@@ -398,13 +420,27 @@ struct MenuBarNotificationListTests {
     )
     state.sidebarItems[id: stamped.id]?.agentSnapshot = .init(
       agents: [.init(agent: .claude, activity: .awaitingInput, since: Date(timeIntervalSince1970: 500))],
-      isWorking: false, hasError: false, since: Date(timeIntervalSince1970: 500))
+      isWorking: false, hasError: false, hasAttention: true, since: Date(timeIntervalSince1970: 500))
     state.sidebarItems[id: bare.id]?.agentSnapshot = .init(
       agents: [.init(agent: .claude, activity: .awaitingInput, since: .distantPast)],
-      isWorking: false, hasError: false, since: nil)
+      isWorking: false, hasError: false, hasAttention: true, since: nil)
     state.reconcileSidebarForTesting()
 
     #expect(state.needsYouRowIDs() == [stamped.id, bare.id])
+  }
+
+  @Test func needsYouIncludesAttentionRowWhenBadgesAreOff() {
+    let quiet = makeWorktree(id: "/tmp/repo/quiet", name: "quiet")
+    let waiting = makeWorktree(id: "/tmp/repo/waiting", name: "waiting")
+    var state = RepositoriesFeature.State(
+      reconciledRepositories: [makeRepository(worktrees: [quiet, waiting])]
+    )
+    // Badges off: the lineup is empty but the records-derived attention flag survives.
+    state.sidebarItems[id: waiting.id]?.agentSnapshot = .init(
+      agents: [], isWorking: false, hasError: false, hasAttention: true, since: Date(timeIntervalSince1970: 10))
+    state.reconcileSidebarForTesting()
+
+    #expect(state.needsYouRowIDs() == [waiting.id])
   }
 
   @Test func postReduceHookRefreshesTheCache() {

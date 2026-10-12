@@ -10,12 +10,12 @@ struct StaleWorktreeClassifierTests {
   private func input(
     _ edit: (inout StaleWorktreeClassifier.Input) -> Void = { _ in }
   ) -> StaleWorktreeClassifier.Input {
-    var i = StaleWorktreeClassifier.Input(
+    var value = StaleWorktreeClassifier.Input(
       isMainWorktree: false, isPinned: false, isArchived: false, isMissing: false,
       hasOpenPullRequest: false, aheadCount: 1, isTreeClean: true,
       lastFocusedAt: now, createdAt: now)
-    edit(&i)
-    return i
+    edit(&value)
+    return value
   }
 
   private func classify(
@@ -25,8 +25,55 @@ struct StaleWorktreeClassifierTests {
     StaleWorktreeClassifier.classify(input(edit), now: now, staleAfterDays: staleAfterDays)
   }
 
-  @Test func emptyWhenNothingAheadAndClean() {
-    #expect(classify { $0.aheadCount = 0 } == .empty)
+  @Test func emptyWhenNothingAheadAndCleanPastTheGracePeriod() {
+    let aged = now.addingTimeInterval(-StaleWorktreeClassifier.emptyGracePeriod)
+    #expect(
+      classify {
+        $0.aheadCount = 0
+        $0.lastFocusedAt = aged
+      } == .empty)
+  }
+
+  @Test func justCreatedCleanWorktreeIsNotEmpty() {
+    #expect(classify { $0.aheadCount = 0 } == nil)
+    let almost = now.addingTimeInterval(-StaleWorktreeClassifier.emptyGracePeriod + 1)
+    #expect(
+      classify {
+        $0.aheadCount = 0
+        $0.lastFocusedAt = almost
+      } == nil)
+  }
+
+  @Test func emptyFallsBackToCreatedAtAndNeedsAReferenceDate() {
+    let aged = now.addingTimeInterval(-day * 2)
+    #expect(
+      classify {
+        $0.aheadCount = 0
+        $0.lastFocusedAt = nil
+        $0.createdAt = aged
+      } == .empty)
+    #expect(
+      classify {
+        $0.aheadCount = 0
+        $0.lastFocusedAt = nil
+        $0.createdAt = nil
+      } == nil)
+  }
+
+  @Test func liveAgentOrSelectionIsNeverStale() {
+    let old = now.addingTimeInterval(-day * 30)
+    #expect(
+      classify {
+        $0.hasLiveAgent = true
+        $0.lastFocusedAt = old
+        $0.aheadCount = 0
+      } == nil)
+    #expect(
+      classify {
+        $0.isSelected = true
+        $0.lastFocusedAt = old
+        $0.aheadCount = 0
+      } == nil)
   }
 
   @Test func notEmptyWhenDirty() {
@@ -34,11 +81,12 @@ struct StaleWorktreeClassifierTests {
       classify {
         $0.aheadCount = 0
         $0.isTreeClean = false
+        $0.lastFocusedAt = now.addingTimeInterval(-day * 2)
       } == nil)
   }
 
   @Test func unknownCountsAreNeverEmpty() {
-    #expect(classify { $0.aheadCount = nil } == nil)
+    #expect(classify { $0.aheadCount = nil; $0.lastFocusedAt = now.addingTimeInterval(-day * 2) } == nil)
   }
 
   @Test func idleAfterThreshold() {

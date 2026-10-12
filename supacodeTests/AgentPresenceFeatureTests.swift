@@ -1117,16 +1117,23 @@ struct AgentPresenceFeatureTests {
     #expect(harness.state.rowSnapshot(across: [a], badgesEnabled: true).since == Date(timeIntervalSince1970: 200))
   }
 
-  @Test func lastEventAtIsStampedOnEveryEvent() {
+  @Test func rowSnapshotReportsAttentionAndSinceWithBadgesOff() {
     var harness = Harness(now: Date(timeIntervalSince1970: 100))
-    let a = UUID()
-    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .codex, surfaceID: a, pid: getpid())))
-    harness.now = Date(timeIntervalSince1970: 150)
-    harness.send(.hookEventReceived(makeEvent(.busy, agent: .codex, surfaceID: a, pid: getpid())))
-    harness.now = Date(timeIntervalSince1970: 175)
-    harness.send(.hookEventReceived(makeEvent(.busy, agent: .codex, surfaceID: a, pid: getpid())))  // unchanged activity
-    #expect(harness.state.lastEventAt[.codex] == Date(timeIntervalSince1970: 175))
-    #expect(harness.state.lastEventAt[.claude] == nil)
+    let surface = UUID()
+    harness.send(.hookEventReceived(makeEvent(.sessionStart, agent: .claude, surfaceID: surface, pid: getpid())))
+    harness.now = Date(timeIntervalSince1970: 250)
+    harness.send(.hookEventReceived(makeEvent(.awaitingInput, agent: .claude, surfaceID: surface, pid: getpid())))
+    let snapshot = harness.state.rowSnapshot(across: [surface], badgesEnabled: false)
+    #expect(snapshot.agents.isEmpty)
+    #expect(snapshot.hasAttention)
+    #expect(snapshot.since == Date(timeIntervalSince1970: 250))
+  }
+
+  @Test func rowSnapshotWithoutAttentionReportsNone() {
+    var harness = Harness(now: Date(timeIntervalSince1970: 100))
+    let surface = UUID()
+    harness.send(.hookEventReceived(makeEvent(.busy, agent: .claude, surfaceID: surface, pid: getpid())))
+    #expect(!harness.state.rowSnapshot(across: [surface], badgesEnabled: true).hasAttention)
   }
 
   @Test func restoreCarriesActivitySince() {

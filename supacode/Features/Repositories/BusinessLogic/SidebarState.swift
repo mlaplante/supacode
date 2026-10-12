@@ -448,15 +448,20 @@ nonisolated extension SidebarState {
   /// Stamp the worktree as used at `date`. Looks in every bucket so an
   /// archived row that receives a late hook event still records it. Returns
   /// whether the stamp changed; a stamp within `touchMinimumInterval` of the
-  /// existing one is left alone.
+  /// existing one is left alone unless `force` (an explicit selection must
+  /// stamp exactly, so "recent activity" ordering is not 15-minute quantized).
   @discardableResult
-  mutating func touch(worktree worktreeID: Worktree.ID, in repositoryID: Repository.ID, at date: Date) -> Bool {
+  mutating func touch(
+    worktree worktreeID: Worktree.ID,
+    in repositoryID: Repository.ID,
+    at date: Date,
+    force: Bool = false
+  ) -> Bool {
     guard var section = sections[repositoryID] else { return false }
     for (bucketID, var bucket) in section.buckets where bucket.items[worktreeID] != nil {
-      if let existing = bucket.items[worktreeID]?.lastFocusedAt,
-        abs(date.timeIntervalSince(existing)) < Self.touchMinimumInterval
-      {
-        return false
+      if let existing = bucket.items[worktreeID]?.lastFocusedAt {
+        if existing == date { return false }
+        if !force, abs(date.timeIntervalSince(existing)) < Self.touchMinimumInterval { return false }
       }
       bucket.items[worktreeID]?.lastFocusedAt = date
       section.buckets[bucketID] = bucket

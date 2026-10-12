@@ -140,7 +140,7 @@ struct SidebarItemFeature {
     var hasAgentError: Bool { agentSnapshot.hasError }
     /// An agent is parked on the user (awaiting input or errored). The one rule
     /// behind the Active ordering, the menu bar's Needs You section and the jump command.
-    var needsAttention: Bool { agentSnapshot.agents.contains(where: { $0.activity.isAttention }) }
+    var needsAttention: Bool { agentSnapshot.hasAttention }
     /// When the wait began; a missing stamp sorts last (`distantFuture`).
     var attentionSince: Date { agentSnapshot.since ?? .distantFuture }
 

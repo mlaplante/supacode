@@ -178,7 +178,7 @@ struct SidebarHighlightOrderingTests {
     #expect(ids == ["c", "b", "a"])
   }
 
-  @Test func notifiedStillBeatsAttentionWhenPrioritized() {
+  @Test func attentionBeatsNotifiedWhenPrioritized() {
     let ids = SidebarHighlightOrdering.orderedRowIDs(
       forPinned: false,
       prioritizeNotified: true,
@@ -188,6 +188,18 @@ struct SidebarHighlightOrderingTests {
           "b", branch: "b", classification: .awaiting, attentionSince: Date(timeIntervalSince1970: 100)),
       ]
     )
-    #expect(ids == ["a", "b"])
+    #expect(ids == ["b", "a"])
+  }
+
+  @Test func notifiedStillLeadsAmongNonAttentionRowsWhenPrioritized() {
+    let ids = SidebarHighlightOrdering.orderedRowIDs(
+      forPinned: false,
+      prioritizeNotified: true,
+      candidates: [
+        candidate("a", branch: "a", classification: .agent),
+        candidate("b", branch: "b", isNotified: true, classification: .agent),
+      ]
+    )
+    #expect(ids == ["b", "a"])
   }
 }

@@ -88,4 +88,14 @@ struct AppFeatureWorktreeTouchedTests {
     await store.finish()
     #expect(store.state.repositories.sidebar.lastFocusedAt(for: worktree.id) == nil)
   }
+
+  @Test(.dependencies) func hookEventFeedsTheActivityMirror() async {
+    let surfaceID = UUID()
+    let (store, _) = makeStore(surfaceID: surfaceID)
+    await store.send(.terminalEvent(.agentHookEventReceived(hookEvent("idle", surfaceID: surfaceID))))
+    await store.finish()
+    // `liveValue` reads the process-global mirror; `testValue` ignores it.
+    let dates = await AgentHookActivityClient.liveValue.lastEventDates()
+    #expect(dates[.claude] == now)
+  }
 }

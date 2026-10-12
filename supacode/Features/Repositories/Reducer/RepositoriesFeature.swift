@@ -567,6 +567,8 @@ struct RepositoriesFeature {
     case unpinWorktree(Worktree.ID)
     /// The worktree was used (agent activity on one of its surfaces); stamps `lastFocusedAt`.
     case worktreeTouched(Worktree.ID)
+    /// Follow-up of `worktreeTouched` when the stamp moved a `.recentActivity` section's order.
+    case worktreeTouchReordered
     case presentAlert(title: String, message: String)
     case worktreeInfoEvent(WorktreeInfoWatcherClient.Event)
     case worktreeBranchNameLoaded(worktreeID: Worktree.ID, name: String)
@@ -2845,7 +2847,17 @@ struct RepositoriesFeature {
           .send(.sidebarItems(.element(id: worktreeID, action: .syncStateChanged(true)))),
           .run { send in
             // Dirty-tree guard runs here, not in canSync, because fileStatus is async.
-            if let status = await gitClient.fileStatus(url), !status.isClean {
+            // An unreadable status fails closed: it must not look like a clean tree.
+            guard let status = await gitClient.fileStatus(url) else {
+              await send(
+                .syncWorktreeFinished(
+                  worktreeID: worktreeID,
+                  result: .failure(.failed("Couldn't read the worktree status. Try again."))
+                )
+              )
+              return
+            }
+            if !status.isClean {
               await send(
                 .syncWorktreeFinished(
                   worktreeID: worktreeID,
@@ -4233,7 +4245,7 @@ struct RepositoriesFeature {
       case .selectWorktree(let rawWorktreeID, let focusTerminal):
         let worktreeID = rawWorktreeID.map { state.resolvedWorktreeID(for: $0) }
         state.setSingleWorktreeSelection(worktreeID)
-        if let worktreeID { state.touchWorktree(worktreeID) }
+        if let worktreeID { state.touchWorktree(worktreeID, force: true) }
         let selectedWorktree = state.worktree(for: worktreeID)
         var effects: [Effect<Action>] = [
           .send(.delegate(.selectedWorktreeChanged(selectedWorktree)))
@@ -4250,9 +4262,18 @@ struct RepositoriesFeature {
         return .merge(effects)
 
       case .worktreeTouched(let worktreeID):
-        state.touchWorktree(worktreeID)
-        guard state.sidebarItems[id: worktreeID]?.staleReason != nil else { return .none }
-        return .send(.reclassifyStale(worktreeID: worktreeID))
+        let changed = state.touchWorktree(worktreeID)
+        var effects: [Effect<Action>] = []
+        // The sort key moved: only a `.recentActivity` section reads it.
+        if changed, let repositoryID = state.repositoryID(containing: worktreeID),
+          state.sidebar.sections[repositoryID]?.worktreeSort == .recentActivity
+        {
+          effects.append(.send(.worktreeTouchReordered))
+        }
+        if state.sidebarItems[id: worktreeID]?.staleReason != nil {
+          effects.append(.send(.reclassifyStale(worktreeID: worktreeID)))
+        }
+        return .merge(effects)
 
       case .selectWorktreeAtHotkeySlot(let index):
         // Snapshot-driven menu items capture only the slot index, so the
@@ -4868,7 +4889,7 @@ struct RepositoriesFeature {
         .setAutoDeleteArchivedWorktreesAfterDays, .autoDeleteExpiredArchivedWorktrees, .setMoveNotifiedWorktreeToTop,
         .setInstalledOpenActions, .openActionSettingsChanged, .resolveOpenActions, .openActionsResolved,
         .refreshAheadBehind, .worktreeAheadBehindLoaded, .worktreeTreeCleanLoaded, .reclassifyStale,
-        .reclassifyAllStale, .syncWorktreeWithBase, .syncWorktreeFinished:
+        .reclassifyAllStale, .syncWorktreeWithBase, .syncWorktreeFinished, .worktreeTouchReordered:
         // Real handling lives in `githubIntegrationReducer` (combined below) to keep `body`
         // under the type-checker's complexity limit.
         return .none
@@ -6124,7 +6145,9 @@ extension RepositoriesFeature.State {
       aheadCount: row.aheadCount,
       isTreeClean: row.isTreeClean,
       lastFocusedAt: lastFocusedAt,
-      createdAt: worktree.createdAt
+      createdAt: worktree.createdAt,
+      hasLiveAgent: !row.agentSnapshot.agents.isEmpty,
+      isSelected: selectedWorktreeID == worktreeID
     )
     // The clock only matters for the idle rule, which needs a reference date; skip the read otherwise.
     let hasReferenceDate = lastFocusedAt != nil || worktree.createdAt != nil
@@ -6338,13 +6361,18 @@ extension RepositoriesFeature.State {
   /// Stamp `lastFocusedAt` for `worktreeID` through the shared sidebar.
   /// No sidebar row means no stamp. The shared lock (and its persisted write) is
   /// skipped unless the stamp would actually change.
-  mutating func touchWorktree(_ worktreeID: Worktree.ID) {
+  /// `force` bypasses the hook-path throttle (selection is an explicit user act).
+  /// Returns whether the stamp changed.
+  @discardableResult
+  mutating func touchWorktree(_ worktreeID: Worktree.ID, force: Bool = false) -> Bool {
     guard let repositoryID = repositoryID(containing: worktreeID),
       sidebar.currentBucket(of: worktreeID, in: repositoryID) != nil
-    else { return }
+    else { return false }
     @Dependency(\.date.now) var now
-    guard sidebar.needsTouch(worktree: worktreeID, at: now) else { return }
-    $sidebar.withLock { $0.touch(worktree: worktreeID, in: repositoryID, at: now) }
+    guard force || sidebar.needsTouch(worktree: worktreeID, at: now) else { return false }
+    var changed = false
+    $sidebar.withLock { changed = $0.touch(worktree: worktreeID, in: repositoryID, at: now, force: force) }
+    return changed
   }
 
   func repositoryID(containing worktreeID: Worktree.ID) -> Repository.ID? {
@@ -7226,7 +7254,11 @@ extension RepositoriesFeature.State {
   /// gates the destructive drop of `.pinned` / `.unpinned` items whose worktree
   /// isn't in the live roster; pass `false` on the first load to keep curated
   /// items through the hydration race.
-  mutating func reconcileSidebarState(roots: [URL], pruneLivenessAgainstRoster: Bool) {
+  ///
+  /// `now` stamps items that have no `lastFocusedAt` yet (see `stampMissingLastFocusedAt`).
+  /// It defaults to the wall clock rather than `@Dependency(\.date)` so this
+  /// state-level pass stays callable outside a configured store.
+  mutating func reconcileSidebarState(roots: [URL], pruneLivenessAgainstRoster: Bool, now: Date = Date()) {
     // Empty-everything reload: bail. A settings-file read failure or a
     // pre-rehydration window with zero roots + zero repos would obliterate
     // curation if we overwrote `sidebar.json` from here.
@@ -7266,6 +7298,7 @@ extension RepositoriesFeature.State {
       }
       Self.seedLiveWorktrees(
         into: &copy, repository: repository, mainID: mainID, seenInCuratedBuckets: seenInCuratedBuckets)
+      Self.stampMissingLastFocusedAt(in: &copy, liveWorktreeIDs: worktreeIDs, excluding: mainID, at: now)
       // Same carve-out: a disconnected remote's empty roster would otherwise drop
       // every stored branch-collapse prefix.
       if !isUnresolvedRemotePlaceholder {
@@ -7338,6 +7371,28 @@ extension RepositoriesFeature.State {
       var unpinned = copy.buckets[.unpinned] ?? .init()
       unpinned.items[worktree.id] = .init()
       copy.buckets[.unpinned] = unpinned
+    }
+  }
+
+  /// Gives every live, non-main item without a `lastFocusedAt` the reconcile time.
+  /// It happens once per item (the stamp is non-nil afterwards), so idle-staleness
+  /// of worktrees that predate the stamp counts from the upgrade instead of
+  /// flagging every old worktree on first launch.
+  private static func stampMissingLastFocusedAt(
+    in section: inout SidebarState.Section,
+    liveWorktreeIDs: Set<Worktree.ID>,
+    excluding mainID: Worktree.ID?,
+    at date: Date
+  ) {
+    for bucketID in [SidebarState.BucketID.pinned, .unpinned] {
+      guard var bucket = section.buckets[bucketID] else { continue }
+      var changed = false
+      for id in bucket.items.keys
+      where id != mainID && liveWorktreeIDs.contains(id) && bucket.items[id]?.lastFocusedAt == nil {
+        bucket.items[id]?.lastFocusedAt = date
+        changed = true
+      }
+      if changed { section.buckets[bucketID] = bucket }
     }
   }
 

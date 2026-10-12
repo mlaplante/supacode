@@ -12,8 +12,10 @@ public nonisolated struct AgentHookActivityClient: Sendable {
 }
 
 nonisolated extension AgentHookActivityClient {
-  /// Mirror of the presence reducer's `lastEventAt`, fed by `AppFeature` on every
-  /// hook event. Process-wide so the live client needs no store reference.
+  /// The single source of truth for "when did a hook last fire per agent", fed by
+  /// `AppFeature` on every hook event. Process-global (shared by every store in the
+  /// process, never reset) so the live client needs no store reference; `testValue`
+  /// ignores it and reports no events.
   private static let mirror = LockIsolated<[SkillAgent: Date]>([:])
 
   /// Called by the app reducer for each received hook event.

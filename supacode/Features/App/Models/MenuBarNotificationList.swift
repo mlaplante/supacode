@@ -73,7 +73,8 @@ extension RepositoriesFeature.State {
     let needsYou = needsYouRowIDs()
     let needsYouSet = Set(needsYou)
     sections.needsYou = needsYou
-    sections.pinned = hoists.pinned
+    // A pinned row that needs you is listed once, under Needs You.
+    sections.pinned = hoists.pinned.filter { !needsYouSet.contains($0) }
     sections.active = hoists.active.filter { !needsYouSet.contains($0) }
 
     let unread = unreadRowIDs()

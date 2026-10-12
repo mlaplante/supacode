@@ -33,6 +33,14 @@ struct GitStatusParserTests {
     #expect(GitStatusSnapshot.parse(porcelainV2: "") == .empty)
   }
 
+  @Test func untrackedOnlyTreeIsNotClean() {
+    #expect(!GitStatusSnapshot.parse(porcelainV2: Self.stream(["? scratch.log"])).isClean)
+  }
+
+  @Test func ignoredOnlyTreeIsClean() {
+    #expect(GitStatusSnapshot.parse(porcelainV2: Self.stream(["! node_modules/"])).isClean)
+  }
+
   @Test func unstagedModificationSetsWorktreeAxisOnly() {
     let snapshot = GitStatusSnapshot.parse(porcelainV2: Self.stream([Self.ordinary(".M", "a.txt")]))
     #expect(snapshot.statuses["a.txt"]?.worktree == .modified)

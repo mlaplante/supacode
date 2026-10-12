@@ -467,6 +467,18 @@ struct SidebarStateTests {
     #expect(state.lastFocusedAt(for: "/tmp/wt") == later)
   }
 
+  @Test func forcedTouchRestampsWithinTheMinimumInterval() {
+    var state = touchFixture()
+    let first = Date(timeIntervalSince1970: 10_000)
+    state.touch(worktree: "/tmp/wt", in: repoA, at: first)
+    let later = first.addingTimeInterval(60)
+    let changed = state.touch(worktree: "/tmp/wt", in: repoA, at: later, force: true)
+    #expect(changed)
+    #expect(state.lastFocusedAt(for: "/tmp/wt") == later)
+    let repeated = state.touch(worktree: "/tmp/wt", in: repoA, at: later, force: true)
+    #expect(!repeated)
+  }
+
   @Test func touchOnMissingRowIsANoop() {
     var state = touchFixture()
     let otherWorktree = state.touch(worktree: "/tmp/other", in: repoA, at: Date())

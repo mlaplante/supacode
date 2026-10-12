@@ -107,7 +107,7 @@ struct AppFeatureJumpToNextAwaitingTests {
       repositoriesState.sidebarItems[id: worktree.id]?.surfaceIDs = [surfaceID]
       repositoriesState.sidebarItems[id: worktree.id]?.agentSnapshot = .init(
         agents: [.init(agent: .claude, activity: .awaitingInput, since: since)],
-        isWorking: false, hasError: false, since: since)
+        isWorking: false, hasError: false, hasAttention: true, since: since)
       presence.records[.init(agent: .claude, surfaceID: surfaceID)] = .init(
         activity: .awaitingInput, pids: [], activitySince: since)
     }
