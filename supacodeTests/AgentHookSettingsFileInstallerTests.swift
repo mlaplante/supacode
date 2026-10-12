@@ -340,6 +340,35 @@ struct AgentHookSettingsFileInstallerTests {
     #expect(try installer.installState(settingsURL: url, hookGroupsByEvent: groups) == .installed)
   }
 
+  @Test func installStateIsOutdatedWhenCanonicalGainsAnEvent() throws {
+    // A managed set on disk that is a strict subset of the canonical map (the old
+    // Codex map before it gained more events) must read `.outdated`, which is
+    // what arms the once-per-session reinstall.
+    let url = makeTempURL()
+    defer { try? fileManager.removeItem(at: url.deletingLastPathComponent()) }
+
+    let installer = makeInstaller()
+    let onDisk = sampleHookGroups()
+    try installer.install(settingsURL: url, hookGroupsByEvent: onDisk)
+
+    var canonical = onDisk
+    canonical["PermissionRequest"] = [
+      .object([
+        "hooks": .array([
+          .object([
+            "type": "command",
+            "command": .string(
+              AgentHookSettingsCommand.compositeCommand(
+                events: [.awaitingInput], forwardStdinAsNotification: true, agent: .claude)),
+            "timeout": 10,
+          ])
+        ])
+      ])
+    ]
+
+    #expect(try installer.installState(settingsURL: url, hookGroupsByEvent: canonical) == .outdated)
+  }
+
   @Test func containsMatchingHooksReturnsFalseWhenMissing() throws {
     let url = makeTempURL()
     let installer = makeInstaller()

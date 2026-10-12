@@ -90,11 +90,11 @@ public nonisolated enum SkillAgent: String, Equatable, Sendable, CaseIterable, C
     case .activityBadge, .idleBadge, .skills:
       true
     case .inputNeededBadge:
-      self == .claude || self == .grok || self == .copilot || self == .kimi || self == .opencode
+      self == .claude || self == .codex || self == .grok || self == .copilot || self == .kimi || self == .opencode
     case .errorDetection:
       self == .claude || self == .antigravity
     case .compactionBadge:
-      self == .claude
+      self == .claude || self == .codex
     case .notifications:
       self != .opencode
     case .customFolder:
