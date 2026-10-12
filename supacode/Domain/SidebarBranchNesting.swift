@@ -90,7 +90,8 @@ enum SidebarBranchNesting {
   static func buildRows(
     itemIDs: [SidebarItemID],
     branchNames: [SidebarItemID: String],
-    collapsedPrefixes: Set<String>
+    collapsedPrefixes: Set<String>,
+    siblingRanks: [SidebarItemID: Int]? = nil
   ) -> [Row] {
     guard !itemIDs.isEmpty else { return [] }
 
@@ -98,7 +99,10 @@ enum SidebarBranchNesting {
     // alphabetical sort by branch name. Custom drag-and-drop order is preserved
     // by the caller when grouping is off and is restored verbatim once the user
     // toggles grouping back off.
+    // With `siblingRanks` (a worktree sort), insertion follows that rank so
+    // siblings at every level, and groups by their best member, keep it.
     let sortedIDs = itemIDs.sorted { lhs, rhs in
+      if let siblingRanks, let l = siblingRanks[lhs], let r = siblingRanks[rhs], l != r { return l < r }
       let lhsKey = branchNames[lhs] ?? lhs.rawValue
       let rhsKey = branchNames[rhs] ?? rhs.rawValue
       return lhsKey.localizedCaseInsensitiveCompare(rhsKey) == .orderedAscending

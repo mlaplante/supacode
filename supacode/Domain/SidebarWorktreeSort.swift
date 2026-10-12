@@ -32,7 +32,7 @@ nonisolated enum SidebarWorktreeSort: String, CaseIterable, Codable, Equatable, 
   var allowsReordering: Bool { self == .manual }
 
   /// Final tie-break is the input position, so equal keys keep their manual order.
-  func ordered<ID: Hashable>(_ ids: [ID], key: (ID) -> Key) -> [ID] {
+  func ordered<ID>(_ ids: [ID], key: (ID) -> Key) -> [ID] {
     switch self {
     case .manual:
       return ids

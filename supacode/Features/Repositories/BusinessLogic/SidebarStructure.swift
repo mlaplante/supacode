@@ -610,9 +610,10 @@ extension RepositoriesFeature.Action {
     // into the sidebar layout's highlight tag and the notification group name.
     case .repositoryCustomization(.presented(.delegate(.save))):
       return .allSidebar
-    // The sort re-orders the unpinned tail, which the hotkey / selection walks follow.
+    // The sort re-orders the unpinned tail in the structure; the selection
+    // slices read the bucket order, not the displayed one.
     case .setWorktreeSort:
-      return .allSidebar
+      return .sidebarStructure
     case .repositoryCustomization:
       return []
 
@@ -1260,16 +1261,8 @@ extension SidebarItemGroup {
 
     // Overlay on the unpinned tail only; the pinned tail stays in manual order.
     let sort = state.sidebar.sections[repositoryID]?.worktreeSort ?? .manual
-    if sort != .manual {
-      unpinnedTail = sort.ordered(unpinnedTail) { id in
-        let row = state.sidebarItems[id: id]
-        return .init(
-          lastFocusedAt: state.sidebar.lastFocusedAt(for: id),
-          rank: Self.agentRank(row),
-          since: row?.agentSnapshot.since,
-          branchName: row?.branchName ?? id.rawValue)
-      }
-    }
+    unpinnedTail = sortedUnpinnedTail(unpinnedTail, repositoryID: repositoryID, nest: nestWorktreesByBranch, in: state)
+    let unpinnedRanks = sortRanks(unpinnedTail, sort: sort)
 
     let isSoleDefaultWorktree =
       mainID != nil && pinnedTail.isEmpty && pendingTail.isEmpty && unpinnedTail.isEmpty
@@ -1300,13 +1293,46 @@ extension SidebarItemGroup {
         repositoryID: repositoryID,
         rowIDs: unpinnedTail,
         nestedRows: nestedRows(
-          unpinnedTail, bucket: .unpinned, in: state, repositoryID: repositoryID, nest: nestWorktreesByBranch),
+          unpinnedTail, bucket: .unpinned, in: state, repositoryID: repositoryID, nest: nestWorktreesByBranch,
+          siblingRanks: unpinnedRanks),
         sortAllowsReordering: sort.allowsReordering
       ),
     ]
   }
 
-  private static func agentRank(_ row: SidebarItemFeature.State?) -> Int {
+  /// The section's worktree sort applied to its unpinned tail. The one source
+  /// of that order: `computeSlots` (render) and `orderedSidebarItemIDs`
+  /// (hotkeys / arrow nav) both call it, so they cannot drift. With nesting on
+  /// the input is branch-sorted first so ties resolve the same in both callers.
+  static func sortedUnpinnedTail(
+    _ ids: [SidebarItemID],
+    repositoryID: Repository.ID,
+    nest: Bool,
+    in state: RepositoriesFeature.State
+  ) -> [SidebarItemID] {
+    let sort = state.sidebar.sections[repositoryID]?.worktreeSort ?? .manual
+    guard sort != .manual else { return ids }
+    let base = nest ? sortedByBranchName(ids, in: state) : ids
+    return sort.ordered(base) { id in
+      let row = state.sidebarItems[id: id]
+      return .init(
+        lastFocusedAt: state.sidebar.lastFocusedAt(for: id),
+        rank: agentRank(row),
+        since: row?.agentSnapshot.since,
+        branchName: row?.branchName ?? id.rawValue)
+    }
+  }
+
+  /// Position of each already-sorted id, handed to branch nesting so siblings
+  /// at every level follow the sort. Nil in manual mode (nesting keeps its
+  /// alphabetical order).
+  static func sortRanks(_ sortedIDs: [SidebarItemID], sort: SidebarWorktreeSort) -> [SidebarItemID: Int]? {
+    guard sort != .manual else { return nil }
+    return Dictionary(
+      sortedIDs.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { first, _ in first })
+  }
+
+  static func agentRank(_ row: SidebarItemFeature.State?) -> Int {
     guard let row else { return 4 }
     if row.hasAgentError { return 0 }
     if row.hasAgentAwaitingInput { return 1 }
@@ -1327,7 +1353,8 @@ extension SidebarItemGroup {
     bucket: SidebarBucket,
     in state: RepositoriesFeature.State,
     repositoryID: Repository.ID,
-    nest: Bool
+    nest: Bool,
+    siblingRanks: [SidebarItemID: Int]? = nil
   ) -> [SidebarBranchNesting.Row] {
     guard nest, !ids.isEmpty else { return leafRows(ids) }
     let collapsedPrefixes = state.sidebar.sections[repositoryID]?.buckets[bucket]?.collapsedBranchPrefixes ?? []
@@ -1341,7 +1368,8 @@ extension SidebarItemGroup {
     return SidebarBranchNesting.buildRows(
       itemIDs: ids,
       branchNames: branchNames,
-      collapsedPrefixes: collapsedPrefixes
+      collapsedPrefixes: collapsedPrefixes,
+      siblingRanks: siblingRanks
     )
   }
 
