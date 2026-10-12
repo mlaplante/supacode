@@ -326,6 +326,58 @@ struct SidebarStructureTests {
     #expect(unpinnedTail == [unpinB.id, unpinX.id])
   }
 
+  @Test func agentStateSortAppliesToUnpinnedTailOnlyAndDisablesMove() {
+    let repoRoot = URL(fileURLWithPath: "/tmp/repo")
+    let main = makeMainWorktree(repoRoot: repoRoot)
+    let pinned = makeWorktree(id: "/tmp/repo/pinned", name: "pinned", repoRoot: repoRoot)
+    let one = makeWorktree(id: "/tmp/repo/one", name: "one", repoRoot: repoRoot)
+    let two = makeWorktree(id: "/tmp/repo/two", name: "two", repoRoot: repoRoot)
+    let three = makeWorktree(id: "/tmp/repo/three", name: "three", repoRoot: repoRoot)
+    let repository = Repository(
+      id: RepositoryID(repoRoot.path(percentEncoded: false)),
+      rootURL: repoRoot,
+      name: "repo",
+      worktrees: IdentifiedArray(uniqueElements: [main, pinned, one, two, three])
+    )
+    var state = makeState(repositories: [repository])
+    state.$sidebar.withLock { sidebar in
+      var section = sidebar.sections[repository.id] ?? .init()
+      var pinnedBucket = section.buckets[.pinned] ?? .init()
+      pinnedBucket.items[pinned.id] = .init()
+      section.buckets[.pinned] = pinnedBucket
+      var unpinnedBucket = section.buckets[.unpinned] ?? .init()
+      unpinnedBucket.items.removeValue(forKey: pinned.id)
+      section.buckets[.unpinned] = unpinnedBucket
+      sidebar.sections[repository.id] = section
+    }
+    state.reconcileSidebarForTesting()
+    for id in [one.id, two.id, three.id] {
+      let name = state.sidebarItems[id: id]?.name ?? id.rawValue
+      state.sidebarItems[id: id]?.branchName = name
+    }
+    state.sidebarItems[id: three.id]?.agentSnapshot.agents = [
+      .init(agent: .claude, activity: .awaitingInput, since: .distantPast)
+    ]
+
+    func groups() -> [SidebarItemGroup] {
+      SidebarItemGroup.computeSlots(
+        in: state, repositoryID: repository.id, pendingIDs: [], hoistedRowIDs: [], nestWorktreesByBranch: false)
+    }
+    let manualUnpinned = groups().first { $0.slot == .unpinnedTail }
+    #expect(manualUnpinned?.moveBehavior == .unpinned(repository.id))
+    let manualOrder = manualUnpinned?.rowIDs ?? []
+    #expect(Set(manualOrder) == [one.id, two.id, three.id])
+
+    state.$sidebar.withLock { $0.sections[repository.id]?.worktreeSort = .agentState }
+    let sorted = groups()
+    let sortedUnpinned = sorted.first { $0.slot == .unpinnedTail }
+    #expect(sortedUnpinned?.rowIDs.first == three.id)
+    #expect(sortedUnpinned?.rowIDs.dropFirst().elementsEqual(manualOrder.filter { $0 != three.id }) == true)
+    #expect(sortedUnpinned?.moveBehavior == .disabled)
+    #expect(sorted.first { $0.slot == .pinnedTail }?.rowIDs == [pinned.id])
+    #expect(sorted.first { $0.slot == .pinnedTail }?.moveBehavior == .pinned(repository.id))
+  }
+
   @Test func nestByBranchOffPreservesBucketOrder() {
     let repoRoot = URL(fileURLWithPath: "/tmp/repo")
     let main = makeMainWorktree(repoRoot: repoRoot)

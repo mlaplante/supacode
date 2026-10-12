@@ -621,6 +621,7 @@ struct RepositoriesFeature {
     case delayedPullRequestRefresh(Worktree.ID)
     case openRepositorySettings(Repository.ID)
     case requestCustomizeRepository(Repository.ID)
+    case setWorktreeSort(repositoryID: Repository.ID, sort: SidebarWorktreeSort)
     case requestCustomizeWorktree(Worktree.ID, Repository.ID)
     /// Deeplink / CLI appearance update: overwrites the row's sidebar title and tint.
     /// `nil` clears the field; omit-vs-clear was already resolved upstream in `AppFeature`.
@@ -4831,6 +4832,10 @@ struct RepositoriesFeature {
           title: storedTitle,
           color: storedColor
         )
+        return .none
+
+      case .setWorktreeSort(let repositoryID, let sort):
+        state.$sidebar.withLock { $0.sections[repositoryID]?.worktreeSort = sort }
         return .none
 
       case .repositoryCustomization(.presented(.delegate(.cancel))):

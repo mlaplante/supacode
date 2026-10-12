@@ -160,6 +160,8 @@ struct SidebarItemGroup: Identifiable, Equatable, Sendable {
   /// observation-track every row at the group and re-render the whole bucket
   /// on any one row's tick.
   var nestedRows: [SidebarBranchNesting.Row] = []
+  /// False when the section's worktree sort overlays the persisted drag order.
+  var sortAllowsReordering: Bool = true
 
   var id: Slot { slot }
 
@@ -171,7 +173,7 @@ struct SidebarItemGroup: Identifiable, Equatable, Sendable {
     switch slot {
     case .main, .pending: .disabled
     case .pinnedTail: .pinned(repositoryID)
-    case .unpinnedTail: .unpinned(repositoryID)
+    case .unpinnedTail: sortAllowsReordering ? .unpinned(repositoryID) : .disabled
     }
   }
 
@@ -607,6 +609,9 @@ extension RepositoriesFeature.Action {
     // Repo customization save mutates the section title / color, which flow
     // into the sidebar layout's highlight tag and the notification group name.
     case .repositoryCustomization(.presented(.delegate(.save))):
+      return .allSidebar
+    // The sort re-orders the unpinned tail, which the hotkey / selection walks follow.
+    case .setWorktreeSort:
       return .allSidebar
     case .repositoryCustomization:
       return []
@@ -1253,6 +1258,19 @@ extension SidebarItemGroup {
       unpinnedTail = sortedByBranchName(unpinnedTail, in: state)
     }
 
+    // Overlay on the unpinned tail only; the pinned tail stays in manual order.
+    let sort = state.sidebar.sections[repositoryID]?.worktreeSort ?? .manual
+    if sort != .manual {
+      unpinnedTail = sort.ordered(unpinnedTail) { id in
+        let row = state.sidebarItems[id: id]
+        return .init(
+          lastFocusedAt: state.sidebar.lastFocusedAt(for: id),
+          rank: Self.agentRank(row),
+          since: row?.agentSnapshot.since,
+          branchName: row?.branchName ?? id.rawValue)
+      }
+    }
+
     let isSoleDefaultWorktree =
       mainID != nil && pinnedTail.isEmpty && pendingTail.isEmpty && unpinnedTail.isEmpty
 
@@ -1282,9 +1300,19 @@ extension SidebarItemGroup {
         repositoryID: repositoryID,
         rowIDs: unpinnedTail,
         nestedRows: nestedRows(
-          unpinnedTail, bucket: .unpinned, in: state, repositoryID: repositoryID, nest: nestWorktreesByBranch)
+          unpinnedTail, bucket: .unpinned, in: state, repositoryID: repositoryID, nest: nestWorktreesByBranch),
+        sortAllowsReordering: sort.allowsReordering
       ),
     ]
+  }
+
+  private static func agentRank(_ row: SidebarItemFeature.State?) -> Int {
+    guard let row else { return 4 }
+    if row.hasAgentError { return 0 }
+    if row.hasAgentAwaitingInput { return 1 }
+    if row.hasAgentActivity { return 2 }
+    if !row.agents.isEmpty { return 3 }
+    return 4
   }
 
   private static func leafRows(_ ids: [SidebarItemID]) -> [SidebarBranchNesting.Row] {
