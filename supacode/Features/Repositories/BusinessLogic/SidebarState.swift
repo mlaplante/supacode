@@ -423,16 +423,36 @@ nonisolated extension SidebarState {
     insert(worktree: worktreeID, in: repositoryID, bucket: .pinned, item: carried, position: 0)
   }
 
+  /// Smallest gap between two recorded stamps. The stale threshold is measured in
+  /// days, and every stamp re-encodes the whole persisted sidebar, so busy hook
+  /// events (one per agent tool call) must not each write.
+  static let touchMinimumInterval: TimeInterval = 15 * 60
+
+  /// Whether `touch` would change anything at `date`.
+  func needsTouch(worktree worktreeID: Worktree.ID, at date: Date) -> Bool {
+    guard let existing = lastFocusedAt(for: worktreeID) else { return true }
+    return abs(date.timeIntervalSince(existing)) >= Self.touchMinimumInterval
+  }
+
   /// Stamp the worktree as used at `date`. Looks in every bucket so an
-  /// archived row that receives a late hook event still records it.
-  mutating func touch(worktree worktreeID: Worktree.ID, in repositoryID: Repository.ID, at date: Date) {
-    guard var section = sections[repositoryID] else { return }
+  /// archived row that receives a late hook event still records it. Returns
+  /// whether the stamp changed; a stamp within `touchMinimumInterval` of the
+  /// existing one is left alone.
+  @discardableResult
+  mutating func touch(worktree worktreeID: Worktree.ID, in repositoryID: Repository.ID, at date: Date) -> Bool {
+    guard var section = sections[repositoryID] else { return false }
     for (bucketID, var bucket) in section.buckets where bucket.items[worktreeID] != nil {
+      if let existing = bucket.items[worktreeID]?.lastFocusedAt,
+        abs(date.timeIntervalSince(existing)) < Self.touchMinimumInterval
+      {
+        return false
+      }
       bucket.items[worktreeID]?.lastFocusedAt = date
       section.buckets[bucketID] = bucket
       sections[repositoryID] = section
-      return
+      return true
     }
+    return false
   }
 
   /// Unpin `worktreeID`: the mirror of `pin`, collapsing into a single

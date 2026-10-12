@@ -9492,6 +9492,17 @@ struct RepositoriesFeatureTests {
     #expect(store.state.sidebar.lastFocusedAt(for: worktree.id) == now)
   }
 
+  @Test func worktreeTouchedWithoutSidebarRowStampsNothing() async {
+    let worktree = makeWorktree(id: "/tmp/repo/wt", name: "wt", repoRoot: "/tmp/repo")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    let store = TestStore(initialState: makeState(repositories: [repository])) {
+      RepositoriesFeature()
+    }
+    store.exhaustivity = .off
+    await store.send(.worktreeTouched(worktree.id))
+    #expect(store.state.sidebar.lastFocusedAt(for: worktree.id) == nil)
+  }
+
   @Test func worktreeTouchedStampsLastFocusedAt() async {
     let now = Date(timeIntervalSince1970: 5_000)
     let (store, worktree) = makeLastFocusedStore(now: now)

@@ -4168,7 +4168,7 @@ struct RepositoriesFeature {
       case .selectWorktree(let rawWorktreeID, let focusTerminal):
         let worktreeID = rawWorktreeID.map { state.resolvedWorktreeID(for: $0) }
         state.setSingleWorktreeSelection(worktreeID)
-        if let worktreeID { state.touchWorktree(worktreeID, at: now) }
+        if let worktreeID { state.touchWorktree(worktreeID) }
         let selectedWorktree = state.worktree(for: worktreeID)
         var effects: [Effect<Action>] = [
           .send(.delegate(.selectedWorktreeChanged(selectedWorktree)))
@@ -4181,7 +4181,7 @@ struct RepositoriesFeature {
         return .merge(effects)
 
       case .worktreeTouched(let worktreeID):
-        state.touchWorktree(worktreeID, at: now)
+        state.touchWorktree(worktreeID)
         return .none
 
       case .selectWorktreeAtHotkeySlot(let index):
@@ -6198,13 +6198,15 @@ extension RepositoriesFeature.State {
   }
 
   /// Stamp `lastFocusedAt` for `worktreeID` through the shared sidebar.
-  /// `date` is an autoclosure so the clock is read only when a sidebar row exists to stamp.
-  mutating func touchWorktree(_ worktreeID: Worktree.ID, at date: @autoclosure () -> Date) {
+  /// No sidebar row means no stamp. The shared lock (and its persisted write) is
+  /// skipped unless the stamp would actually change.
+  mutating func touchWorktree(_ worktreeID: Worktree.ID) {
     guard let repositoryID = repositoryID(containing: worktreeID),
       sidebar.currentBucket(of: worktreeID, in: repositoryID) != nil
     else { return }
-    let stamp = date()
-    $sidebar.withLock { $0.touch(worktree: worktreeID, in: repositoryID, at: stamp) }
+    @Dependency(\.date.now) var now
+    guard sidebar.needsTouch(worktree: worktreeID, at: now) else { return }
+    $sidebar.withLock { $0.touch(worktree: worktreeID, in: repositoryID, at: now) }
   }
 
   func repositoryID(containing worktreeID: Worktree.ID) -> Repository.ID? {
