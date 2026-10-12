@@ -25,7 +25,9 @@ extension GitSyncError {
   var readableMessage: String {
     switch self {
     case .conflict(let operation):
-      return "\(operation.verb) stopped on conflicts. The \(operation.rawValue) was aborted and your branch is unchanged."
+      return
+        "\(operation.verb) stopped on conflicts. "
+        + "The \(operation.rawValue) was aborted and your branch is unchanged."
     case .failed(let raw):
       return Self.firstStderrLine(in: raw)
         ?? raw.split(whereSeparator: \.isNewline)

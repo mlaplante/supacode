@@ -219,9 +219,7 @@ extension GitClientDependency: DependencyKey {
       renameBranch: { oldName, newName, repoRoot in
         try await GitClient(shell: shell).renameBranch(from: oldName, to: newName, for: repoRoot)
       },
-      isValidBranchName: { branchName, repoRoot in
-        await GitClient(shell: shell).isValidBranchName(branchName, for: repoRoot)
-      },
+      isValidBranchName: { await GitClient(shell: shell).isValidBranchName($0, for: $1) },
       branchInventory: { try await GitClient(shell: shell).branchInventory(for: $0, remoteNames: $1) },
       defaultRemoteBranchRef: { try await GitClient(shell: shell).defaultRemoteBranchRef(for: $0) },
       automaticWorktreeBaseRef: { await GitClient(shell: shell).automaticWorktreeBaseRef(for: $0) },
@@ -277,9 +275,7 @@ extension GitClientDependency: DependencyKey {
       removeWorktree: { worktree, deleteBranch in
         try await GitClient(shell: shell).removeWorktree(worktree, deleteBranch: deleteBranch)
       },
-      isBareRepository: { repoRoot in
-        try await GitClient(shell: shell).isBareRepository(for: repoRoot)
-      },
+      isBareRepository: { try await GitClient(shell: shell).isBareRepository(for: $0) },
       branchName: { await GitClient(shell: shell).symbolicHeadBranch(at: $0) },
       lineChanges: { await GitClient(shell: shell).lineChanges(at: $0) },
       aheadBehind: { url, base in await GitClient(shell: shell).aheadBehind(at: url, base: base) },
@@ -293,12 +289,8 @@ extension GitClientDependency: DependencyKey {
       },
       remoteNames: { try await GitClient(shell: shell).remoteNames(for: $0) },
       fetchRemote: { remote, repoRoot in try await GitClient(shell: shell).fetchRemote(remote, for: repoRoot) },
-      remoteInfo: { repositoryRoot in
-        await GitClient(shell: shell).remoteInfo(for: repositoryRoot)
-      },
-      gitRemote: { repositoryRoot in
-        await GitClient(shell: shell).remote(for: repositoryRoot)
-      },
+      remoteInfo: { await GitClient(shell: shell).remoteInfo(for: $0) },
+      gitRemote: { await GitClient(shell: shell).remote(for: $0) },
       setUpstreamBranch: { branch, upstream, repoRoot in
         try await GitClient(shell: shell).setUpstreamBranch(branch, to: upstream, for: repoRoot)
       },

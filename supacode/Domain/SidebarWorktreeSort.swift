@@ -37,22 +37,22 @@ nonisolated enum SidebarWorktreeSort: String, CaseIterable, Codable, Equatable, 
     case .manual:
       return ids
     case .recentActivity:
-      return Self.sorted(ids, key: key) { l, r in
-        switch (l.lastFocusedAt, r.lastFocusedAt) {
-        case (let a?, let b?) where a != b: return a > b
+      return Self.sorted(ids, key: key) { lhs, rhs in
+        switch (lhs.lastFocusedAt, rhs.lastFocusedAt) {
+        case (let left?, let right?) where left != right: return left > right
         case (.some, .none): return true
         case (.none, .some): return false
-        default: return Self.nameOrder(l.branchName, r.branchName)
+        default: return Self.nameOrder(lhs.branchName, rhs.branchName)
         }
       }
     case .agentState:
-      return Self.sorted(ids, key: key) { l, r in
-        if l.rank != r.rank { return l.rank < r.rank }
-        switch (l.since, r.since) {
-        case (let a?, let b?) where a != b: return a < b
+      return Self.sorted(ids, key: key) { lhs, rhs in
+        if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+        switch (lhs.since, rhs.since) {
+        case (let left?, let right?) where left != right: return left < right
         case (.some, .none): return true
         case (.none, .some): return false
-        default: return Self.nameOrder(l.branchName, r.branchName)
+        default: return Self.nameOrder(lhs.branchName, rhs.branchName)
         }
       }
     }
@@ -64,15 +64,15 @@ nonisolated enum SidebarWorktreeSort: String, CaseIterable, Codable, Equatable, 
     before: (Key, Key) -> Bool
   ) -> [ID] {
     let keyed = ids.enumerated().map { (offset: $0.offset, id: $0.element, key: key($0.element)) }
-    return keyed.sorted { l, r in
-      if before(l.key, r.key) { return true }
-      if before(r.key, l.key) { return false }
-      return l.offset < r.offset
+    return keyed.sorted { lhs, rhs in
+      if before(lhs.key, rhs.key) { return true }
+      if before(rhs.key, lhs.key) { return false }
+      return lhs.offset < rhs.offset
     }.map(\.id)
   }
 
   /// Strict ordering by name; equal names are "not before" in either direction.
-  private static func nameOrder(_ a: String, _ b: String) -> Bool {
-    a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+  private static func nameOrder(_ lhs: String, _ rhs: String) -> Bool {
+    lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
   }
 }

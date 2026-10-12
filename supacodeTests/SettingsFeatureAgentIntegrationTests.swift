@@ -1334,15 +1334,15 @@ struct SettingsFeatureAgentIntegrationTests {
   }
 
   @Test(.dependencies) func hookActivityLoadsIntoState() async {
-    let t = Date(timeIntervalSince1970: 123)
+    let stamp = Date(timeIntervalSince1970: 123)
     let store = TestStore(initialState: SettingsFeature.State()) {
       SettingsFeature()
     } withDependencies: {
-      $0.agentHookActivityClient.lastEventDates = { [.claude: t] }
+      $0.agentHookActivityClient.lastEventDates = { [.claude: stamp] }
     }
     store.exhaustivity = .off
     await store.send(.refreshHookActivity)
-    await store.receive(\.hookActivityLoaded) { $0.lastHookEventAt = [.claude: t] }
+    await store.receive(\.hookActivityLoaded) { $0.lastHookEventAt = [.claude: stamp] }
   }
 
   @Test(.dependencies) func pollingRefreshesEveryFiveSeconds() async {

@@ -42,7 +42,8 @@ struct SidebarWorktreeSortTests {
   @Test func sectionRoundTripsSortAndOmitsManual() throws {
     var section = SidebarState.Section()
     let manual = try JSONEncoder().encode(section)
-    #expect(!String(decoding: manual, as: UTF8.self).contains("worktreeSort"))
+    let manualText = try #require(String(bytes: manual, encoding: .utf8))
+    #expect(!manualText.contains("worktreeSort"))
     #expect(try JSONDecoder().decode(SidebarState.Section.self, from: manual).worktreeSort == .manual)
     section.worktreeSort = .agentState
     let data = try JSONEncoder().encode(section)

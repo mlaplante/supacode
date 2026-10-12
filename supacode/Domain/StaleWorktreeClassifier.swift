@@ -16,8 +16,9 @@ nonisolated enum StaleReason: Equatable, Sendable {
   }
 }
 
-/// Pure rule. A live agent or the selected worktree is never stale. Unknown counts (`aheadCount == nil`, `isTreeClean == nil`) never
-/// produce `empty`; a missing probe must not look like a verdict.
+/// Pure rule. A live agent or the selected worktree is never stale. Unknown counts
+/// (`aheadCount == nil`, `isTreeClean == nil`) never produce `empty`; a missing probe
+/// must not look like a verdict.
 nonisolated enum StaleWorktreeClassifier {
   struct Input: Equatable, Sendable {
     var isMainWorktree: Bool

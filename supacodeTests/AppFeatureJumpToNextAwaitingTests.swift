@@ -33,8 +33,8 @@ struct AppFeatureJumpToNextAwaitingTests {
     let store = makeStore(
       worktrees: [newer, older],
       awaiting: [
-        (newer, newerSurface, Date(timeIntervalSince1970: 900)),
-        (older, olderSurface, Date(timeIntervalSince1970: 100)),
+        AwaitingRow(worktree: newer, surfaceID: newerSurface, since: Date(timeIntervalSince1970: 900)),
+        AwaitingRow(worktree: older, surfaceID: olderSurface, since: Date(timeIntervalSince1970: 100)),
       ]
     ) { values in
       values.terminalClient.tabID = { worktreeID, surfaceID in
@@ -60,7 +60,7 @@ struct AppFeatureJumpToNextAwaitingTests {
     let surface = UUID()
     let store = makeStore(
       worktrees: [worktree],
-      awaiting: [(worktree, surface, Date(timeIntervalSince1970: 100))]
+      awaiting: [AwaitingRow(worktree: worktree, surfaceID: surface, since: Date(timeIntervalSince1970: 100))]
     ) { values in
       values.date = .constant(Date(timeIntervalSince1970: 1_000))
       values.continuousClock = ImmediateClock()
@@ -89,9 +89,15 @@ struct AppFeatureJumpToNextAwaitingTests {
     )
   }
 
+  private struct AwaitingRow {
+    let worktree: Worktree
+    let surfaceID: UUID
+    let since: Date
+  }
+
   private func makeStore(
     worktrees: [Worktree],
-    awaiting: [(Worktree, UUID, Date)] = [],
+    awaiting: [AwaitingRow] = [],
     withAdditionalDependencies: (inout DependencyValues) -> Void
   ) -> TestStoreOf<AppFeature> {
     let repository = Repository(
@@ -103,7 +109,8 @@ struct AppFeatureJumpToNextAwaitingTests {
     var repositoriesState = RepositoriesFeature.State(reconciledRepositories: [repository])
     repositoriesState.isInitialLoadComplete = true
     var presence = AgentPresenceFeature.State()
-    for (worktree, surfaceID, since) in awaiting {
+    for row in awaiting {
+      let (worktree, surfaceID, since) = (row.worktree, row.surfaceID, row.since)
       repositoriesState.sidebarItems[id: worktree.id]?.surfaceIDs = [surfaceID]
       repositoriesState.sidebarItems[id: worktree.id]?.agentSnapshot = .init(
         agents: [.init(agent: .claude, activity: .awaitingInput, since: since)],

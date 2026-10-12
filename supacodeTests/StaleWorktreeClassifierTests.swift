@@ -86,7 +86,11 @@ struct StaleWorktreeClassifierTests {
   }
 
   @Test func unknownCountsAreNeverEmpty() {
-    #expect(classify { $0.aheadCount = nil; $0.lastFocusedAt = now.addingTimeInterval(-day * 2) } == nil)
+    #expect(
+      classify {
+        $0.aheadCount = nil
+        $0.lastFocusedAt = now.addingTimeInterval(-day * 2)
+      } == nil)
   }
 
   @Test func idleAfterThreshold() {

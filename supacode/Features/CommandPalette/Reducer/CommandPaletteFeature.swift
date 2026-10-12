@@ -899,16 +899,9 @@ private func delegateAction(for kind: CommandPaletteItem.Kind) -> CommandPalette
   switch kind {
   case .worktreeSelect(let id):
     return .selectWorktree(id)
-  case .checkForUpdates:
-    return .checkForUpdates
-  case .openSettings:
-    return .openSettings
-  case .newWorktree:
-    return .newWorktree
-  case .openRepository:
-    return .openRepository
-  case .addRemoteRepository:
-    return .addRemoteRepository
+  case .checkForUpdates, .openSettings, .newWorktree, .openRepository, .addRemoteRepository,
+    .viewArchivedWorktrees, .viewStaleWorktrees, .jumpToNextAwaiting, .refreshWorktrees:
+    return kind.appLevelDelegate!
   case .removeWorktree(let worktreeID, let repositoryID):
     return .removeWorktree(worktreeID, repositoryID)
   case .archiveWorktree(let worktreeID, let repositoryID):
@@ -916,14 +909,6 @@ private func delegateAction(for kind: CommandPaletteItem.Kind) -> CommandPalette
   case .renameBranch, .customizeRepositoryAppearance, .customizeWorktreeAppearance, .toggleWindowMode,
     .layoutCommand:
     return selectedEntryDelegateAction(for: kind)!
-  case .viewArchivedWorktrees:
-    return .viewArchivedWorktrees
-  case .viewStaleWorktrees:
-    return .viewStaleWorktrees
-  case .jumpToNextAwaiting:
-    return .jumpToNextAwaiting
-  case .refreshWorktrees:
-    return .refreshWorktrees
   case .ghosttyCommand(let action):
     return .ghosttyCommand(action)
   case .openPullRequest,
@@ -941,6 +926,25 @@ private func delegateAction(for kind: CommandPaletteItem.Kind) -> CommandPalette
     case .debugTestToast(let toast):
       return .debugTestToast(toast)
   #endif
+  }
+}
+
+extension CommandPaletteItem.Kind {
+  /// Delegates for the payload-free, app-level actions, grouped so the main
+  /// dispatch stays under the cyclomatic-complexity limit.
+  fileprivate var appLevelDelegate: CommandPaletteFeature.Delegate? {
+    switch self {
+    case .checkForUpdates: .checkForUpdates
+    case .openSettings: .openSettings
+    case .newWorktree: .newWorktree
+    case .openRepository: .openRepository
+    case .addRemoteRepository: .addRemoteRepository
+    case .viewArchivedWorktrees: .viewArchivedWorktrees
+    case .viewStaleWorktrees: .viewStaleWorktrees
+    case .jumpToNextAwaiting: .jumpToNextAwaiting
+    case .refreshWorktrees: .refreshWorktrees
+    default: nil
+    }
   }
 }
 
@@ -962,7 +966,8 @@ private func selectedEntryDelegateAction(
   case .layoutCommand(let command):
     return .layoutCommand(command)
   case .checkForUpdates, .openRepository, .addRemoteRepository, .worktreeSelect, .openSettings,
-    .newWorktree, .removeWorktree, .archiveWorktree, .viewArchivedWorktrees, .viewStaleWorktrees, .jumpToNextAwaiting, .refreshWorktrees,
+    .newWorktree, .removeWorktree, .archiveWorktree, .viewArchivedWorktrees, .viewStaleWorktrees,
+    .jumpToNextAwaiting, .refreshWorktrees,
     .ghosttyCommand, .openPullRequest, .markPullRequestReady, .mergePullRequest,
     .closePullRequest, .copyFailingJobURL, .copyCiFailureLogs, .rerunFailedJobs,
     .openFailingCheckDetails, .runScript, .stopScript:

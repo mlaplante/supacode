@@ -379,7 +379,13 @@ struct SidebarStructureTests {
   }
 
   /// main + three unpinned rows ("one", "two", "three"), branch names set from names.
-  private func makeSortFixture() -> (state: RepositoriesFeature.State, repoID: Repository.ID, ids: [Worktree.ID]) {
+  private struct SortFixture {
+    var state: RepositoriesFeature.State
+    let repoID: Repository.ID
+    let ids: [Worktree.ID]
+  }
+
+  private func makeSortFixture() -> SortFixture {
     let repoRoot = URL(fileURLWithPath: "/tmp/repo")
     let main = makeMainWorktree(repoRoot: repoRoot)
     let one = makeWorktree(id: "/tmp/repo/one", name: "one", repoRoot: repoRoot)
@@ -396,11 +402,14 @@ struct SidebarStructureTests {
       let name = state.sidebarItems[id: id]?.name ?? id.rawValue
       state.sidebarItems[id: id]?.branchName = name
     }
-    return (state, repository.id, [one.id, two.id, three.id])
+    return SortFixture(state: state, repoID: repository.id, ids: [one.id, two.id, three.id])
   }
 
   @Test func orderedSidebarItemIDsFollowsAgentStateSort() {
-    var (state, repoID, ids) = makeSortFixture()
+    let fixture = makeSortFixture()
+    var state = fixture.state
+    let repoID = fixture.repoID
+    let ids = fixture.ids
     state.sidebarItems[id: ids[2]]?.agentSnapshot.agents = [
       .init(agent: .claude, activity: .awaitingInput, since: .distantPast)
     ]
@@ -416,7 +425,10 @@ struct SidebarStructureTests {
   }
 
   @Test func sortAppliesWithinBranchNesting() {
-    var (state, repoID, ids) = makeSortFixture()
+    let fixture = makeSortFixture()
+    var state = fixture.state
+    let repoID = fixture.repoID
+    let ids = fixture.ids
     state.sidebarItems[id: ids[2]]?.agentSnapshot.agents = [
       .init(agent: .claude, activity: .awaitingInput, since: .distantPast)
     ]
@@ -433,7 +445,10 @@ struct SidebarStructureTests {
   }
 
   @Test func recentActivitySortUsesLastFocusedAt() {
-    var (state, repoID, ids) = makeSortFixture()
+    let fixture = makeSortFixture()
+    var state = fixture.state
+    let repoID = fixture.repoID
+    let ids = fixture.ids
     state.reconcileSidebarForTesting()
     state.$sidebar.withLock { sidebar in
       sidebar.sections[repoID, default: .init()].worktreeSort = .recentActivity
@@ -448,7 +463,9 @@ struct SidebarStructureTests {
   }
 
   @Test func agentRankCoversAllFiveRanks() {
-    var (state, _, ids) = makeSortFixture()
+    let fixture = makeSortFixture()
+    var state = fixture.state
+    let ids = fixture.ids
     #expect(SidebarItemGroup.agentRank(nil) == 4)
     #expect(SidebarItemGroup.agentRank(state.sidebarItems[id: ids[0]]) == 4)
     state.sidebarItems[id: ids[0]]?.agentSnapshot.agents = [.init(agent: .claude, activity: .idle, since: .distantPast)]
@@ -610,7 +627,9 @@ struct SidebarStructureTests {
     // running) is the reverse of alphabetical, proving classification no longer
     // drives order.
     state.sidebarItems[id: charlie.id]?.agentSnapshot.hasError = true
-    state.sidebarItems[id: bravo.id]?.agentSnapshot.agents = [.init(agent: .claude, activity: .idle, since: .distantPast)]
+    state.sidebarItems[id: bravo.id]?.agentSnapshot.agents = [
+      .init(agent: .claude, activity: .idle, since: .distantPast)
+    ]
     state.sidebarItems[id: alpha.id]?.runningScripts.append(.init(id: UUID(), tint: .blue))
 
     let structure = state.computeSidebarStructure(groupPinned: false, groupActive: true)
