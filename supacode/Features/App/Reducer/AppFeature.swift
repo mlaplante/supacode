@@ -540,7 +540,7 @@ struct AppFeature {
           // Selecting the archived list must NOT overwrite the last
           // focused live worktree — preserve `focusedWorktreeID` so
           // returning from archives restores the prior row.
-          if !state.repositories.isShowingArchivedWorktrees {
+          if !state.repositories.isShowingArchivedWorktrees, !state.repositories.isShowingStaleWorktrees {
             state.repositories.$sidebar.withLock { sidebar in
               sidebar.focusedWorktreeID = lastFocusedWorktreeID
             }
@@ -809,6 +809,8 @@ struct AppFeature {
           .send(.repositories(.setGithubIntegrationEnabled(anyForgeIntegrationEnabled))),
           .merge(forgeTeardownEffects),
           .send(.repositories(.setMergedWorktreeAction(settings.mergedWorktreeAction))),
+          // The stale threshold feeds every row's classification.
+          .send(.repositories(.reclassifyAllStale)),
           .send(.repositories(.setMoveNotifiedWorktreeToTop(settings.moveNotifiedWorktreeToTop))),
           // The global default editor feeds every repo's resolved open action, and the
           // selected worktree's own open action resolves against it too.
@@ -1841,6 +1843,9 @@ struct AppFeature {
 
       case .commandPalette(.delegate(.viewArchivedWorktrees)):
         return .send(.repositories(.selectArchivedWorktrees))
+
+      case .commandPalette(.delegate(.viewStaleWorktrees)):
+        return .send(.repositories(.selectStaleWorktrees))
 
       case .commandPalette(.delegate(.jumpToNextAwaiting)):
         return .send(.jumpToNextAwaiting)

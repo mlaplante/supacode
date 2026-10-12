@@ -270,6 +270,7 @@ private struct CommandPaletteRowView: View {
     switch row.kind {
     case .checkForUpdates, .openRepository, .addRemoteRepository, .openSettings, .newWorktree,
       .viewArchivedWorktrees,
+      .viewStaleWorktrees,
       .jumpToNextAwaiting,
       .refreshWorktrees,
       .ghosttyCommand,
@@ -311,6 +312,8 @@ private struct CommandPaletteRowView: View {
       return "plus"
     case .viewArchivedWorktrees:
       return "archivebox"
+    case .viewStaleWorktrees:
+      return "clock.badge.xmark"
     case .jumpToNextAwaiting:
       return "person.crop.circle.badge.exclamationmark"
     case .refreshWorktrees:
@@ -362,6 +365,7 @@ private struct CommandPaletteRowView: View {
     switch row.kind {
     case .checkForUpdates, .openRepository, .addRemoteRepository, .openSettings, .newWorktree,
       .viewArchivedWorktrees,
+      .viewStaleWorktrees,
       .jumpToNextAwaiting,
       .refreshWorktrees,
       .ghosttyCommand,
@@ -501,6 +505,8 @@ private struct CommandPaletteRowView: View {
       base = "New Worktree"
     case .viewArchivedWorktrees:
       base = "View Archived Worktrees"
+    case .viewStaleWorktrees:
+      base = "Review Stale Worktrees"
     case .jumpToNextAwaiting:
       base = "Jump to Next Awaiting Agent"
     case .refreshWorktrees:

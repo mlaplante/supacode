@@ -56,6 +56,45 @@ struct AppFeatureArchivedSelectionTests {
     #expect(store.state.repositories.sidebar.focusedWorktreeID == priorFocus)
   }
 
+  @Test(.dependencies) func selectingStaleWorktreesDoesNotClearLastFocused() async {
+    let rootURL = URL(fileURLWithPath: "/tmp/repo")
+    let worktree = Worktree(
+      id: "/tmp/repo/wt1",
+      name: "wt1",
+      detail: "",
+      workingDirectory: URL(fileURLWithPath: "/tmp/repo/wt1"),
+      repositoryRootURL: rootURL
+    )
+    let repository = Repository(
+      id: RepositoryID(rootURL.path(percentEncoded: false)),
+      rootURL: rootURL,
+      name: "repo",
+      worktrees: IdentifiedArray(uniqueElements: [worktree])
+    )
+    var repositoriesState = RepositoriesFeature.State(reconciledRepositories: [repository])
+    repositoriesState.selection = .worktree(worktree.id)
+    let priorFocus = repositoriesState.sidebar.focusedWorktreeID
+    let store = TestStore(
+      initialState: AppFeature.State(
+        repositories: repositoriesState,
+        settings: SettingsFeature.State()
+      )
+    ) {
+      AppFeature()
+    } withDependencies: {
+      $0.terminalClient.send = { _ in }
+      $0.worktreeInfoWatcher.send = { _ in }
+    }
+
+    await store.send(.repositories(.selectStaleWorktrees)) {
+      $0.repositories.selection = .staleWorktrees
+      $0.worktreeMenuSnapshot.hasSelectedGitWorktree = false
+    }
+    await store.receive(\.repositories.delegate.selectedWorktreeChanged)
+    await store.finish()
+    #expect(store.state.repositories.sidebar.focusedWorktreeID == priorFocus)
+  }
+
   @Test(.dependencies) func repositoriesChangedPrunesArchivedWorktreesFromTerminalAndRunScriptStatus() async {
     let rootURL = URL(fileURLWithPath: "/tmp/repo")
     let activeWorktree = Worktree(

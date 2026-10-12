@@ -21,6 +21,7 @@ struct CommandPaletteFeatureTests {
       "global.new-worktree",
       "global.refresh-worktrees",
       "global.view-archived-worktrees",
+      "global.view-stale-worktrees",
       "global.jump-to-next-awaiting",
     ]
     #if DEBUG

@@ -545,6 +545,10 @@ private struct TrailingView: View {
           BehindCountContent(behind: behind, base: store.syncBaseRef ?? "base")
             .equatable()
         }
+        if let reason = store.staleReason, !store.isPinned {
+          StaleIndicatorContent(reason: reason)
+            .equatable()
+        }
         if let prText {
           PullRequestBadgeContent(text: prText)
             .equatable()
@@ -662,6 +666,18 @@ private struct BehindCountContent: View, Equatable {
       .foregroundStyle(.secondary)
       .help("\(behind) commit\(behind == 1 ? "" : "s") behind \(base)")
       .accessibilityLabel("\(behind) commits behind \(base)")
+  }
+}
+
+private struct StaleIndicatorContent: View, Equatable {
+  let reason: StaleReason
+
+  var body: some View {
+    Image(systemName: "clock.badge.xmark")
+      .appFont(.caption)
+      .foregroundStyle(.tertiary)
+      .help(reason.title)
+      .accessibilityLabel("Stale: \(reason.title)")
   }
 }
 

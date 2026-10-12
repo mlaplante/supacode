@@ -450,6 +450,9 @@ extension SidebarItemFeature.Action {
     // read the leaf store directly, so no cache holds these fields.
     case .aheadBehindChanged, .syncStateChanged:
       return []
+    // The stale indicator is a row accessory read from the leaf store; no cache holds it.
+    case .staleReasonChanged, .treeCleanChanged:
+      return []
     case .diffStatsChanged, .pullRequestQueryStarted,
       .dragSessionChanged,
       .focusTerminalRequested, .focusTerminalConsumed:
@@ -546,7 +549,9 @@ extension RepositoriesFeature.Action {
     // Launchers and results route into the row leaf via `.sidebarItems`, whose
     // inner actions declare their own invalidations. `syncWorktreeFinished`
     // only raises an alert (an `@Presents` field outside every cache).
+    // Stale classification only dispatches row actions (which declare their own).
     case .refreshAheadBehind, .worktreeAheadBehindLoaded,
+      .worktreeTreeCleanLoaded, .reclassifyStale, .reclassifyAllStale,
       .syncWorktreeWithBase, .syncWorktreeFinished:
       return []
 
@@ -600,7 +605,7 @@ extension RepositoriesFeature.Action {
       return []
 
     // Selection changes refresh both selection-derived caches.
-    case .selectionChanged, .selectWorktree, .selectArchivedWorktrees,
+    case .selectionChanged, .selectWorktree, .selectArchivedWorktrees, .selectStaleWorktrees,
       .selectNextWorktree, .selectPreviousWorktree, .selectWorktreeAtHotkeySlot,
       .worktreeHistoryBack, .worktreeHistoryForward,
       .setSidebarSelectedWorktreeIDs:

@@ -106,6 +106,11 @@ struct SidebarItemFeature {
     var hasProbedAheadBehind = false
     /// A rebase / merge is in flight; the row menu disables sync meanwhile.
     var isSyncing = false
+    /// Why this row is a cleanup candidate, if it is. Classified by the parent from the
+    /// ahead count, tree cleanliness, last focus and settings; `nil` means not stale.
+    var staleReason: StaleReason?
+    /// Working tree has no tracked or untracked change. `nil` until probed (or when the probe failed).
+    var isTreeClean: Bool?
     var pullRequest: ForgePullRequest?
     /// Branch name at PR-query start; on result land, mismatched results are dropped.
     /// Cleared by the next row dispatch or reconcile; may linger after a refresh
@@ -167,6 +172,8 @@ struct SidebarItemFeature {
     case diffStatsChanged(added: Int?, removed: Int?)
     case aheadBehindChanged(ahead: Int?, behind: Int?, base: String?)
     case syncStateChanged(Bool)
+    case staleReasonChanged(StaleReason?)
+    case treeCleanChanged(Bool?)
     case pullRequestQueryStarted(branch: String)
     case pullRequestChanged(ForgePullRequest?, branchAtQueryTime: String)
     case pullRequestDetailApplied(pullRequestNumber: Int, ForgePullRequestDetail)
@@ -200,6 +207,16 @@ struct SidebarItemFeature {
         state.aheadCount = ahead
         state.behindCount = nextBehind
         state.syncBaseRef = base
+        return .none
+
+      case .staleReasonChanged(let reason):
+        guard state.staleReason != reason else { return .none }
+        state.staleReason = reason
+        return .none
+
+      case .treeCleanChanged(let isClean):
+        guard state.isTreeClean != isClean else { return .none }
+        state.isTreeClean = isClean
         return .none
 
       case .syncStateChanged(let flag):

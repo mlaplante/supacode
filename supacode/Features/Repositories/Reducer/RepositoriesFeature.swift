@@ -29,6 +29,9 @@ private enum CancelID {
   static func worktreeAheadBehind(_ worktreeID: Worktree.ID) -> String {
     "repositories.worktreeAheadBehind.\(worktreeID)"
   }
+  static func worktreeTreeClean(_ worktreeID: Worktree.ID) -> String {
+    "repositories.worktreeTreeClean.\(worktreeID)"
+  }
   static func worktreeLineChanges(_ worktreeID: Worktree.ID) -> String {
     "repositories.worktreeLineChanges.\(worktreeID)"
   }
@@ -418,6 +421,7 @@ struct RepositoriesFeature {
     /// every nested branch-group prefix so the tree opens fully.
     case setAllSidebarGroupsExpanded(Bool)
     case selectArchivedWorktrees
+    case selectStaleWorktrees
     case setSidebarSelectedWorktreeIDs(Set<Worktree.ID>)
     case openRepositories([URL])
     case openRepositoriesFinished(
@@ -568,6 +572,11 @@ struct RepositoriesFeature {
     case worktreeBranchNameLoaded(worktreeID: Worktree.ID, name: String)
     case worktreeLineChangesLoaded(worktreeID: Worktree.ID, added: Int, removed: Int)
     case refreshAheadBehind(worktreeID: Worktree.ID)
+    /// Tree-cleanliness probe landed (`nil` when git could not say); feeds the stale classifier.
+    case worktreeTreeCleanLoaded(worktreeID: Worktree.ID, isClean: Bool?)
+    /// Recompute the row's `staleReason` from its current inputs.
+    case reclassifyStale(worktreeID: Worktree.ID)
+    case reclassifyAllStale
     case worktreeAheadBehindLoaded(worktreeID: Worktree.ID, result: GitAheadBehind?, base: String?)
     case syncWorktreeWithBase(worktreeID: Worktree.ID, operation: GitSyncOperation)
     case syncWorktreeFinished(worktreeID: Worktree.ID, result: Result<Void, GitSyncError>)
@@ -1101,7 +1110,11 @@ struct RepositoriesFeature {
           Self.syncSidebar(&state)
         }
         let repositories = state.repositories
-        return .send(.delegate(.repositoriesChanged(repositories)))
+        // Archived rows are never stale; recompute now that it is live again.
+        return .concatenate(
+          .send(.delegate(.repositoriesChanged(repositories))),
+          .send(.reclassifyStale(worktreeID: worktreeID))
+        )
 
       case .requestDeleteSidebarItems(let targets):
         // Kind discriminator: folders skip the main-worktree guard
@@ -2779,13 +2792,46 @@ struct RepositoriesFeature {
 
       case .worktreeAheadBehindLoaded(let worktreeID, let result, let base):
         guard state.sidebarItems[id: worktreeID] != nil else { return .none }
-        return .send(
+        let aheadBehindEffect: Effect<Action> = .send(
           .sidebarItems(
             .element(
               id: worktreeID,
               action: .aheadBehindChanged(ahead: result?.ahead, behind: result?.behind, base: base)
             )
           )
+        )
+        // A new ahead count can flip `empty`, but only together with tree cleanliness.
+        guard let worktree = state.worktree(for: worktreeID), !worktree.isMissing else {
+          return aheadBehindEffect
+        }
+        let gitClient = gitClient(for: worktree)
+        let url = worktree.workingDirectory
+        return .concatenate(
+          aheadBehindEffect,
+          .run { send in
+            let status = await gitClient.fileStatus(url)
+            await send(.worktreeTreeCleanLoaded(worktreeID: worktreeID, isClean: status?.isClean))
+          }
+          .cancellable(id: CancelID.worktreeTreeClean(worktreeID), cancelInFlight: true)
+        )
+
+      case .worktreeTreeCleanLoaded(let worktreeID, let isClean):
+        guard state.sidebarItems[id: worktreeID] != nil else { return .none }
+        return .concatenate(
+          .send(.sidebarItems(.element(id: worktreeID, action: .treeCleanChanged(isClean)))),
+          .send(.reclassifyStale(worktreeID: worktreeID))
+        )
+
+      case .reclassifyStale(let worktreeID):
+        guard let reason = state.staleReason(for: worktreeID, now: { now }) else {
+          guard state.sidebarItems[id: worktreeID] != nil else { return .none }
+          return .send(.sidebarItems(.element(id: worktreeID, action: .staleReasonChanged(nil))))
+        }
+        return .send(.sidebarItems(.element(id: worktreeID, action: .staleReasonChanged(reason))))
+
+      case .reclassifyAllStale:
+        return .merge(
+          state.sidebarItems.map { row in .send(.reclassifyStale(worktreeID: row.id)) }
         )
 
       case .syncWorktreeWithBase(let worktreeID, let operation):
@@ -3636,8 +3682,21 @@ struct RepositoriesFeature {
             }
           }
           .cancellable(id: CancelID.worktreeLineChanges(worktreeID), cancelInFlight: true)
+          // Edits after the first probe must keep `isTreeClean` honest for rows that are (or could
+          // be) classified `empty`; otherwise the review view would offer to discard dirty work.
+          let row = state.sidebarItems[id: worktreeID]
+          let needsTreeProbe = row?.staleReason != nil || row?.isTreeClean == true
+          let treeProbe: Effect<Action> =
+            needsTreeProbe
+            ? .run { send in
+              let status = await gitClient.fileStatus(worktreeURL)
+              await send(.worktreeTreeCleanLoaded(worktreeID: worktreeID, isClean: status?.isClean))
+            }
+            .cancellable(id: CancelID.worktreeTreeClean(worktreeID), cancelInFlight: true)
+            : .none
           return .merge(
             lineChanges,
+            treeProbe,
             needsAheadBehind ? .send(.refreshAheadBehind(worktreeID: worktreeID)) : .none
           )
         case .repositoryPullRequestRefresh(let repositoryRootURL, let worktreeIDs, let trigger):
@@ -4157,6 +4216,11 @@ struct RepositoriesFeature {
         state.sidebarSelectedWorktreeIDs = []
         return .send(.delegate(.selectedWorktreeChanged(nil)))
 
+      case .selectStaleWorktrees:
+        state.selection = .staleWorktrees
+        state.sidebarSelectedWorktreeIDs = []
+        return .send(.delegate(.selectedWorktreeChanged(nil)))
+
       case .setSidebarSelectedWorktreeIDs(let worktreeIDs):
         let validWorktreeIDs = state.selectableWorktreeIDs
         var nextWorktreeIDs = worktreeIDs.intersection(validWorktreeIDs)
@@ -4174,6 +4238,10 @@ struct RepositoriesFeature {
         var effects: [Effect<Action>] = [
           .send(.delegate(.selectedWorktreeChanged(selectedWorktree)))
         ]
+        // Opening a row resets its idle clock.
+        if let worktreeID, state.sidebarItems[id: worktreeID]?.staleReason != nil {
+          effects.append(.send(.reclassifyStale(worktreeID: worktreeID)))
+        }
         if focusTerminal, let worktreeID, state.sidebarItems[id: worktreeID] != nil {
           effects.append(
             .send(.sidebarItems(.element(id: worktreeID, action: .focusTerminalRequested)))
@@ -4183,7 +4251,8 @@ struct RepositoriesFeature {
 
       case .worktreeTouched(let worktreeID):
         state.touchWorktree(worktreeID)
-        return .none
+        guard state.sidebarItems[id: worktreeID]?.staleReason != nil else { return .none }
+        return .send(.reclassifyStale(worktreeID: worktreeID))
 
       case .selectWorktreeAtHotkeySlot(let index):
         // Snapshot-driven menu items capture only the slot index, so the
@@ -4798,7 +4867,8 @@ struct RepositoriesFeature {
         .openSelectedWorktreePullRequest, .pullRequestOpenFetchLoaded, .pullRequestOpenFetchFailed,
         .setAutoDeleteArchivedWorktreesAfterDays, .autoDeleteExpiredArchivedWorktrees, .setMoveNotifiedWorktreeToTop,
         .setInstalledOpenActions, .openActionSettingsChanged, .resolveOpenActions, .openActionsResolved,
-        .refreshAheadBehind, .worktreeAheadBehindLoaded, .syncWorktreeWithBase, .syncWorktreeFinished:
+        .refreshAheadBehind, .worktreeAheadBehindLoaded, .worktreeTreeCleanLoaded, .reclassifyStale,
+        .reclassifyAllStale, .syncWorktreeWithBase, .syncWorktreeFinished:
         // Real handling lives in `githubIntegrationReducer` (combined below) to keep `body`
         // under the type-checker's complexity limit.
         return .none
@@ -5767,7 +5837,9 @@ struct RepositoriesFeature {
       shouldPruneArchivedWorktreeIDs
       ? state.pruneArchivedWorktreeIDs(availableWorktreeIDs: availableWorktreeIDs)
       : false
-    if !state.isShowingArchivedWorktrees, !state.isSelectionValid(state.selectedWorktreeID) {
+    if !state.isShowingArchivedWorktrees, !state.isShowingStaleWorktrees,
+      !state.isSelectionValid(state.selectedWorktreeID)
+    {
       state.selection = nil
     }
     if state.shouldRestoreLastFocusedWorktree {
@@ -5950,6 +6022,9 @@ extension RepositoriesFeature.State {
     guard !isShowingArchivedWorktrees else {
       return [.archivedWorktrees]
     }
+    guard !isShowingStaleWorktrees else {
+      return [.staleWorktrees]
+    }
     if case .failedRepository(let id) = selection {
       return [.failedRepository(id)]
     }
@@ -6029,6 +6104,64 @@ extension RepositoriesFeature.State {
 
   var isShowingArchivedWorktrees: Bool {
     selection == .archivedWorktrees
+  }
+
+  var isShowingStaleWorktrees: Bool {
+    selection == .staleWorktrees
+  }
+
+  /// The row's current stale verdict from its inputs; `nil` when not stale or unknown.
+  func staleReason(for worktreeID: Worktree.ID, now: () -> Date) -> StaleReason? {
+    @Shared(.settingsFile) var settingsFile
+    guard let row = sidebarItems[id: worktreeID], let worktree = worktree(for: worktreeID) else { return nil }
+    let lastFocusedAt = sidebar.lastFocusedAt(for: worktreeID)
+    let input = StaleWorktreeClassifier.Input(
+      isMainWorktree: row.isMainWorktree,
+      isPinned: row.isPinned,
+      isArchived: archivedWorktreeIDSet.contains(worktreeID),
+      isMissing: row.isMissing,
+      hasOpenPullRequest: row.pullRequest?.state == .open,
+      aheadCount: row.aheadCount,
+      isTreeClean: row.isTreeClean,
+      lastFocusedAt: lastFocusedAt,
+      createdAt: worktree.createdAt
+    )
+    // The clock only matters for the idle rule, which needs a reference date; skip the read otherwise.
+    let hasReferenceDate = lastFocusedAt != nil || worktree.createdAt != nil
+    return StaleWorktreeClassifier.classify(
+      input,
+      now: hasReferenceDate ? now() : .distantPast,
+      staleAfterDays: settingsFile.global.staleWorktreeAfterDays
+    )
+  }
+
+  struct StaleWorktreeRow: Equatable, Identifiable {
+    let worktree: Worktree
+    let reason: StaleReason
+    let lastFocusedAt: Date?
+    let ahead: Int?
+    var id: Worktree.ID { worktree.id }
+  }
+
+  func staleWorktreesByRepository() -> [(repository: Repository, rows: [StaleWorktreeRow])] {
+    var groups: [(repository: Repository, rows: [StaleWorktreeRow])] = []
+    let archivedSet = archivedWorktreeIDSet
+    for repository in repositories {
+      let rows = repository.worktrees.compactMap { worktree -> StaleWorktreeRow? in
+        // A pin or archive can land after the last classification; never list those rows.
+        guard let row = sidebarItems[id: worktree.id], let reason = row.staleReason,
+          !row.isPinned, !archivedSet.contains(worktree.id)
+        else { return nil }
+        return StaleWorktreeRow(
+          worktree: worktree,
+          reason: reason,
+          lastFocusedAt: sidebar.lastFocusedAt(for: worktree.id),
+          ahead: row.aheadCount
+        )
+      }
+      if !rows.isEmpty { groups.append((repository: repository, rows: rows)) }
+    }
+    return groups
   }
 
   var archivedWorktreeIDs: [Worktree.ID] {
@@ -6785,11 +6918,18 @@ extension RepositoriesFeature.State {
     guard let row = sidebarItems[id: worktreeID] else { return .none }
     let nextAdded: Int? = added == 0 && removed == 0 ? nil : added
     let nextRemoved: Int? = added == 0 && removed == 0 ? nil : removed
-    guard row.addedLines != nextAdded || row.removedLines != nextRemoved else { return .none }
-    return .send(
+    // A nonzero diff proves the tree is dirty; no git call needed to un-stale the row.
+    let provesDirty = nextAdded != nil && row.isTreeClean == true
+    guard row.addedLines != nextAdded || row.removedLines != nextRemoved || provesDirty else { return .none }
+    let diffEffect: Effect<RepositoriesFeature.Action> = .send(
       .sidebarItems(
         .element(id: worktreeID, action: .diffStatsChanged(added: nextAdded, removed: nextRemoved))
       )
+    )
+    guard provesDirty else { return diffEffect }
+    return .concatenate(
+      diffEffect,
+      .send(.worktreeTreeCleanLoaded(worktreeID: worktreeID, isClean: false))
     )
   }
 
@@ -6803,7 +6943,7 @@ extension RepositoriesFeature.State {
   ) -> Effect<RepositoriesFeature.Action> {
     guard let row = sidebarItems[id: worktreeID] else { return .none }
     let branch = branchAtQueryTime ?? row.branchName
-    return .send(
+    let pullRequestEffect: Effect<RepositoriesFeature.Action> = .send(
       .sidebarItems(
         .element(
           id: worktreeID,
@@ -6811,6 +6951,10 @@ extension RepositoriesFeature.State {
         )
       )
     )
+    // A PR landing on a stale row may un-stale it (an open PR exempts the row). A row that is not
+    // stale needs nothing: the next ahead/behind probe or focus classifies it with the PR in hand.
+    guard row.staleReason != nil else { return pullRequestEffect }
+    return .concatenate(pullRequestEffect, .send(.reclassifyStale(worktreeID: worktreeID)))
   }
 }
 
@@ -6956,6 +7100,11 @@ extension RepositoriesFeature.State {
 
     guard !selections.contains(.archivedWorktrees) else {
       selection = .archivedWorktrees
+      sidebarSelectedWorktreeIDs = []
+      return .send(.delegate(.selectedWorktreeChanged(nil)))
+    }
+    guard !selections.contains(.staleWorktrees) else {
+      selection = .staleWorktrees
       sidebarSelectedWorktreeIDs = []
       return .send(.delegate(.selectedWorktreeChanged(nil)))
     }
