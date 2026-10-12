@@ -174,6 +174,11 @@ final class WorktreeInfoWatcherManager {
   private var fileEventMonitorFailedIDs: Set<Worktree.ID> = []
   private var headWatcherFailedIDs: Set<Worktree.ID> = []
   private var deferredLineChangeIDs: Set<Worktree.ID> = []
+  /// Local worktrees whose line count is known current: the last probe was
+  /// emitted while both watchers were live, and no file event has arrived
+  /// since. Selecting one skips a redundant `git diff`. Any doubt (new row,
+  /// re-armed or failed watcher, remote host) leaves it out, so it probes.
+  private var lineChangesFreshIDs: Set<Worktree.ID> = []
   private var hasCompletedInitialWorktreeLoad = false
   private var selectedWorktreeID: Worktree.ID?
   private var pullRequestTrackingEnabled = true
@@ -320,7 +325,9 @@ final class WorktreeInfoWatcherManager {
       configureRemoteHeadPoll(for: worktree)
     }
     if let worktreeID {
-      emitLineChangesChanged(worktreeID: worktreeID)
+      if !lineChangesFreshIDs.contains(worktreeID) {
+        emitLineChangesChanged(worktreeID: worktreeID)
+      }
       if let worktree = worktrees[worktreeID] {
         configureRemoteHeadPoll(for: worktree)
       }
@@ -425,7 +432,7 @@ final class WorktreeInfoWatcherManager {
       return
     }
     // Tear down only the monitor value; keep the failed-set so retries log once.
-    fileEventMonitors.removeValue(forKey: worktree.id)?.cancel()
+    stopFileEventMonitor(for: worktree.id)
     let monitor = WorktreeFileEventMonitor(
       rootURLs: roots
     ) { [weak self] in
@@ -473,7 +480,12 @@ final class WorktreeInfoWatcherManager {
     branchDebounceTasks[worktreeID] = task
   }
 
-  private func scheduleFilesChanged(worktreeID: Worktree.ID) {
+  /// Entry point for a raw file event. Internal (not private) so tests can
+  /// simulate one without waiting on a real FSEvents delivery.
+  func scheduleFilesChanged(worktreeID: Worktree.ID) {
+    // Stale from the raw event, not the debounced emit, so selecting the row
+    // mid-debounce still probes.
+    lineChangesFreshIDs.remove(worktreeID)
     filesDebounceTasks[worktreeID]?.cancel()
     let debounceInterval = filesChangedDebounceInterval
     let sleep = self.sleep
@@ -571,6 +583,8 @@ final class WorktreeInfoWatcherManager {
   }
 
   private func stopHeadWatcher(for worktreeID: Worktree.ID) {
+    // Events can be missed while a watcher is down, so the count is suspect.
+    lineChangesFreshIDs.remove(worktreeID)
     if let watcher = headWatchers.removeValue(forKey: worktreeID) {
       watcher.source.cancel()
     }
@@ -578,6 +592,7 @@ final class WorktreeInfoWatcherManager {
 
   private func stopFileEventMonitor(for worktreeID: Worktree.ID) {
     // Runs on the re-arm teardown too, so it must not clear the failed-set.
+    lineChangesFreshIDs.remove(worktreeID)
     fileEventMonitors.removeValue(forKey: worktreeID)?.cancel()
   }
 
@@ -629,6 +644,7 @@ final class WorktreeInfoWatcherManager {
     }
     headWatchers.removeAll()
     fileEventMonitors.removeAll()
+    lineChangesFreshIDs.removeAll()
     fileEventMonitorFailedIDs.removeAll()
     headWatcherFailedIDs.removeAll()
     branchDebounceTasks.removeAll()
@@ -832,7 +848,28 @@ final class WorktreeInfoWatcherManager {
       return
     }
     deferredLineChangeIDs.remove(worktreeID)
-    emit(.filesChanged(worktreeID: worktreeID))
+    let result = emit(.filesChanged(worktreeID: worktreeID))
+    let delivered: Bool
+    switch result {
+    case .enqueued?, .dropped?: delivered = true
+    case .terminated?, nil: delivered = false
+    @unknown default: delivered = false
+    }
+    if delivered, hasLiveLocalWatchers(worktreeID) {
+      lineChangesFreshIDs.insert(worktreeID)
+    } else {
+      lineChangesFreshIDs.remove(worktreeID)
+    }
+  }
+
+  /// Both the HEAD kqueue and the file-event stream are up for a local
+  /// worktree, so any later change will reach `scheduleFilesChanged`.
+  private func hasLiveLocalWatchers(_ worktreeID: Worktree.ID) -> Bool {
+    guard let worktree = worktrees[worktreeID], worktree.host == nil else { return false }
+    return headWatchers[worktreeID] != nil
+      && fileEventMonitors[worktreeID] != nil
+      && !headWatcherFailedIDs.contains(worktreeID)
+      && !fileEventMonitorFailedIDs.contains(worktreeID)
   }
 
   private func emitBranchChanged(worktreeID: Worktree.ID) {
@@ -842,18 +879,28 @@ final class WorktreeInfoWatcherManager {
     emit(.branchChanged(worktreeID: worktreeID))
   }
 
-  private func emit(_ event: WorktreeInfoWatcherClient.Event) {
+  @discardableResult
+  private func emit(
+    _ event: WorktreeInfoWatcherClient.Event
+  ) -> AsyncStream<WorktreeInfoWatcherClient.Event>.Continuation.YieldResult? {
     if case .filesChanged(let worktreeID) = event,
       deferredLineChangeIDs.contains(worktreeID)
     {
-      return
+      return nil
     }
     let result = eventContinuation?.yield(event)
     if case .dropped(let shed)? = result {
+      // The shed diff never runs, so its row's count is no longer known
+      // current. When it sheds a twin of the event just enqueued, the caller
+      // re-marks it fresh after this returns.
+      if case .filesChanged(let shedID) = shed {
+        lineChangesFreshIDs.remove(shedID)
+      }
       let cap = Self.eventBufferCap
       watcherLogger.error(
         "Worktree info event buffer full (cap \(cap)); shed oldest refresh signal: \(Self.label(for: shed)).")
     }
+    return result
   }
 
   /// Compact identity for a backpressure-drop log. Strips the pull-request

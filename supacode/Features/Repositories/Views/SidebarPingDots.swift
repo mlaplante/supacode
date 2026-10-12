@@ -59,13 +59,21 @@ struct SidebarPingStaticDot: View {
   }
 }
 
+/// Every cycling dot ticks on the same absolute 2 s grid that `colorIndex`
+/// reads, so all rows flip color in one frame (one render pass, not N staggered
+/// ones) and a dot never shows the previous color for up to a full period.
 struct SidebarPingCyclingDot: View {
+  static let period: TimeInterval = 2
+  /// Lands each tick just past the grid line so flooring can't read the
+  /// previous slot.
+  static let boundaryNudge: TimeInterval = 0.005
+
   let colors: [Color]
   let size: CGFloat
   let showsSolidCenter: Bool
 
   var body: some View {
-    TimelineView(.periodic(from: .now, by: 2.0)) { timeline in
+    TimelineView(.periodic(from: Self.gridStart(before: .now), by: Self.period)) { timeline in
       let index = Self.colorIndex(for: timeline.date, count: colors.count)
       let color = colors[index]
       ZStack {
@@ -81,10 +89,19 @@ struct SidebarPingCyclingDot: View {
     .accessibilityLabel("Run script active")
   }
 
-  private static func colorIndex(for date: Date, count: Int) -> Int {
+  /// The most recent grid line at or before `date`, shared by every dot.
+  static func gridStart(before date: Date) -> Date {
+    let slot = (date.timeIntervalSinceReferenceDate / period).rounded(.down)
+    let start = Date(timeIntervalSinceReferenceDate: slot * period + boundaryNudge)
+    // Inside the nudge window the grid line is still a few ms ahead; step back
+    // one period so the schedule never starts in the future.
+    return start > date ? start.addingTimeInterval(-period) : start
+  }
+
+  static func colorIndex(for date: Date, count: Int) -> Int {
     guard count > 0 else { return 0 }
-    let seconds = Int(date.timeIntervalSinceReferenceDate)
-    return (seconds / 2) % count
+    let slot = Int((date.timeIntervalSinceReferenceDate / period).rounded(.down))
+    return slot % count
   }
 }
 

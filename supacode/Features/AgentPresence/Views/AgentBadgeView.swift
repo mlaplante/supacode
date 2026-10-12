@@ -116,7 +116,7 @@ struct AgentBadgeView: View {
 }
 
 /// Tooltip that counts up for attention states. The badge itself stays a single
-/// stable view; only a clear overlay lives in the 1 Hz timeline, so the badge is
+/// stable view; only a clear overlay lives in the timeline, so the badge is
 /// never re-evaluated or swapped (which would defeat its activity animation).
 private struct ElapsedHelp: ViewModifier {
   let visual: AgentBadgeVisual
@@ -125,12 +125,29 @@ private struct ElapsedHelp: ViewModifier {
 
   func body(content: Content) -> some View {
     content.overlay {
-      TimelineView(PausableSchedule(start: since ?? .distantPast, isPaused: since == nil)) { context in
-        Color.clear
-          .contentShape(.rect)
-          .help(visual.describing(agent, since: since, now: context.date))
-      }
+      ElapsedHelpOverlay(visual: visual, agent: agent, since: since)
     }
+  }
+}
+
+/// Owns the hover state so a hover flip re-evaluates only this overlay. The
+/// tooltip is only read while the pointer is over the badge, so the timeline
+/// stays paused otherwise instead of ticking every second per waiting agent.
+private struct ElapsedHelpOverlay: View {
+  let visual: AgentBadgeVisual
+  let agent: SkillAgent
+  let since: Date?
+  @State private var isHovered = false
+
+  var body: some View {
+    TimelineView(
+      ElapsedSchedule(start: since ?? .distantPast, style: .spoken, isPaused: since == nil || !isHovered)
+    ) { context in
+      Color.clear
+        .contentShape(.rect)
+        .help(visual.describing(agent, since: since, now: context.date))
+    }
+    .onHover { isHovered = $0 }
   }
 }
 

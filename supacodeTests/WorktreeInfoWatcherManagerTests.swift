@@ -517,6 +517,39 @@ struct WorktreeInfoWatcherManagerTests {
     try FileManager.default.removeItem(at: tempWorktree.tempRoot)
   }
 
+  @Test func aDiffShedUnderBackpressureMakesTheNextSelectionDiff() async throws {
+    let tempRepository = try makeTempRepository(worktreeNames: ["sparrow", "swift"])
+    let first = try #require(tempRepository.worktrees.first)
+    let second = try #require(tempRepository.worktrees.dropFirst().first)
+    let manager = WorktreeInfoWatcherManager(filesChangedDebounceInterval: .seconds(3_600))
+    manager.handleCommand(.setPullRequestTrackingEnabled(false))
+    let stream = manager.eventStream()
+
+    // Nothing drains, so flooding the second row's refreshes sheds the first
+    // row's load-time diff out of the buffer.
+    manager.handleCommand(.setWorktrees([first, second]))
+    for index in 0...WorktreeInfoWatcherManager.eventBufferCap {
+      let changed = Worktree(
+        id: second.id,
+        kind: second.kind,
+        name: second.name,
+        detail: "detail-\(index)",
+        workingDirectory: second.workingDirectory,
+        repositoryRootURL: second.repositoryRootURL
+      )
+      manager.handleCommand(.setWorktrees([first, changed]))
+    }
+    manager.handleCommand(.setSelectedWorktreeID(first.id))
+    manager.handleCommand(.stop)
+
+    var firstCount = 0
+    for await event in stream where event == .filesChanged(worktreeID: first.id) {
+      firstCount += 1
+    }
+    #expect(firstCount == 1)
+    try FileManager.default.removeItem(at: tempRepository.tempRoot)
+  }
+
   @Test func reconcileBackstopRefreshesRemoteLineChangesAndPullRequests() async throws {
     let clock = TestClock()
     let stub = RemoteBranchPollStub(responses: ["main"])
@@ -797,6 +830,96 @@ struct WorktreeInfoWatcherManagerTests {
 
     await clock.advance(by: .seconds(1))
     #expect(await waitForFilesChangedCount(collector, worktreeID: second.id, atLeast: 2) == 2)
+
+    manager.handleCommand(.stop)
+    await task.value
+  }
+
+  @Test func selectingAWorktreeWithAFreshCountSkipsTheDiff() async throws {
+    let clock = TestClock()
+    let tempRepository = try makeTempRepository(worktreeNames: ["sparrow", "swift"])
+    let manager = WorktreeInfoWatcherManager(
+      focusedInterval: .seconds(3_600),
+      unfocusedInterval: .seconds(3_600),
+      filesChangedDebounceInterval: .seconds(3_600),
+      clock: clock
+    )
+    let (collector, task) = startCollecting(manager.eventStream())
+    let firstWorktree = try #require(tempRepository.worktrees.first)
+    let secondWorktree = try #require(tempRepository.worktrees.dropFirst().first)
+
+    manager.handleCommand(.setPullRequestTrackingEnabled(false))
+    manager.handleCommand(.setWorktrees(tempRepository.worktrees))
+    #expect(await waitForFilesChangedCount(collector, worktreeID: firstWorktree.id, atLeast: 1) == 1)
+    #expect(await waitForFilesChangedCount(collector, worktreeID: secondWorktree.id, atLeast: 1) == 1)
+
+    // Both watchers are live and nothing changed since the load-time probe.
+    manager.handleCommand(.setSelectedWorktreeID(firstWorktree.id))
+    manager.handleCommand(.setSelectedWorktreeID(secondWorktree.id))
+    manager.handleCommand(.setSelectedWorktreeID(firstWorktree.id))
+    await drainAsyncEvents(120)
+    #expect(await collector.filesChangedCount(worktreeID: firstWorktree.id) == 1)
+    #expect(await collector.filesChangedCount(worktreeID: secondWorktree.id) == 1)
+
+    manager.handleCommand(.stop)
+    await task.value
+    try FileManager.default.removeItem(at: tempRepository.tempRoot)
+  }
+
+  @Test func aFileEventMakesTheNextSelectionDiffBeforeTheDebounceFires() async throws {
+    let clock = TestClock()
+    let tempRepository = try makeTempRepository(worktreeNames: ["sparrow", "swift"])
+    let manager = WorktreeInfoWatcherManager(
+      focusedInterval: .seconds(3_600),
+      unfocusedInterval: .seconds(3_600),
+      filesChangedDebounceInterval: .seconds(3_600),
+      clock: clock
+    )
+    let (collector, task) = startCollecting(manager.eventStream())
+    let firstWorktree = try #require(tempRepository.worktrees.first)
+    let secondWorktree = try #require(tempRepository.worktrees.dropFirst().first)
+
+    manager.handleCommand(.setPullRequestTrackingEnabled(false))
+    manager.handleCommand(.setWorktrees(tempRepository.worktrees))
+    #expect(await waitForFilesChangedCount(collector, worktreeID: secondWorktree.id, atLeast: 1) == 1)
+    manager.handleCommand(.setSelectedWorktreeID(firstWorktree.id))
+
+    // The debounce window is an hour, so only the raw event can mark it stale.
+    manager.scheduleFilesChanged(worktreeID: secondWorktree.id)
+    manager.handleCommand(.setSelectedWorktreeID(secondWorktree.id))
+    #expect(await waitForFilesChangedCount(collector, worktreeID: secondWorktree.id, atLeast: 2) == 2)
+
+    // That probe made it fresh again.
+    manager.handleCommand(.setSelectedWorktreeID(firstWorktree.id))
+    manager.handleCommand(.setSelectedWorktreeID(secondWorktree.id))
+    await drainAsyncEvents(120)
+    #expect(await collector.filesChangedCount(worktreeID: secondWorktree.id) == 2)
+
+    manager.handleCommand(.stop)
+    await task.value
+    try FileManager.default.removeItem(at: tempRepository.tempRoot)
+  }
+
+  @Test func selectingARemoteWorktreeAlwaysDiffs() async throws {
+    let clock = TestClock()
+    let stub = RemoteBranchPollStub(responses: ["main"])
+    let manager = WorktreeInfoWatcherManager(
+      focusedInterval: .seconds(3_600),
+      unfocusedInterval: .seconds(3_600),
+      filesChangedDebounceInterval: .seconds(3_600),
+      clock: clock,
+      pollRemoteBranch: { _ in await stub.next() }
+    )
+    let (collector, task) = startCollecting(manager.eventStream())
+    let remote = makeRemoteWorktree(name: "remote-eagle")
+
+    manager.handleCommand(.setPullRequestTrackingEnabled(false))
+    manager.handleCommand(.setWorktrees([remote]))
+    #expect(await waitForFilesChangedCount(collector, worktreeID: remote.id, atLeast: 1) == 1)
+
+    // A remote host has no local watcher, so its count is never trusted as fresh.
+    manager.handleCommand(.setSelectedWorktreeID(remote.id))
+    #expect(await waitForFilesChangedCount(collector, worktreeID: remote.id, atLeast: 2) == 2)
 
     manager.handleCommand(.stop)
     await task.value

@@ -27,27 +27,62 @@ enum ElapsedFormatter {
   }
 }
 
-/// Ticks once a second from `start`, or yields a single entry when paused, so a
-/// view can keep one stable `TimelineView` whether or not it needs to tick.
-struct PausableSchedule: TimelineSchedule {
+extension ElapsedFormatter {
+  /// Which formatter a timeline feeds. Each changes its text on a different
+  /// grid, so each gets its own tick stride.
+  enum Style {
+    case compact
+    case spoken
+  }
+
+  /// Seconds until the formatted text can next change, at a given elapsed time.
+  /// Compact drops seconds after a minute; spoken keeps them for the first hour.
+  static func stride(forElapsed seconds: Int, style: Style) -> Int {
+    switch (style, seconds) {
+    case (.compact, ..<60), (.spoken, ..<3_600): 1
+    case (.compact, ..<3_600), (.spoken, ..<86_400): 60
+    case (.compact, ..<86_400), (.spoken, _): 3_600
+    case (.compact, _): 86_400
+    }
+  }
+}
+
+/// Ticks only when the formatted elapsed text can change: every second while
+/// seconds are shown, then every minute, hour, or day. Yields a single entry
+/// when paused, so a view keeps one stable `TimelineView` either way.
+struct ElapsedSchedule: TimelineSchedule {
+  /// Lands each tick just past its boundary. `since + 60` minus `since` can come
+  /// back as 59.999… at real epoch magnitudes, which would floor to the old text.
+  static let boundaryNudge: TimeInterval = 0.005
+
   let start: Date
+  let style: ElapsedFormatter.Style
   let isPaused: Bool
 
   func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnySequence<Date> {
     if isPaused { return AnySequence([startDate]) }
-    return AnySequence(PeriodicTimelineSchedule(from: start, by: 1).entries(from: startDate, mode: mode))
+    let start = start
+    let style = style
+    return AnySequence(
+      sequence(first: startDate) { date in
+        let elapsed = max(0, Int(date.timeIntervalSince(start)))
+        let step = ElapsedFormatter.stride(forElapsed: elapsed, style: style)
+        let next = (elapsed / step + 1) * step
+        return start.addingTimeInterval(TimeInterval(next) + Self.boundaryNudge)
+      })
   }
 }
 
-/// Self-ticking compact elapsed label. Ticks once a second via `TimelineView`,
+/// Self-ticking compact elapsed label. Ticks only when the compact text changes,
 /// so the reducer never schedules display work. `stateLabel` is the VoiceOver
-/// verb phrase ("waiting", "errored").
+/// verb phrase ("waiting", "errored"). Past a minute the VoiceOver seconds can
+/// lag by up to 59 s; that is the price of not re-rendering every second.
 struct ElapsedLabel: View {
   let since: Date
   var stateLabel = "waiting"
 
   var body: some View {
-    TimelineView(PausableSchedule(start: since, isPaused: false)) { context in
+    TimelineView(ElapsedSchedule(start: since, style: .compact, isPaused: false)) { context in
       Text(ElapsedFormatter.compact(from: since, to: context.date))
         .appFont(.caption)
         .monospacedDigit()
