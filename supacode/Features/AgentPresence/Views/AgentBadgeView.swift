@@ -115,20 +115,21 @@ struct AgentBadgeView: View {
   )
 }
 
-/// Tooltip that counts up for attention states; a plain static tooltip otherwise.
-/// The timeline lives in the view so the reducer never schedules display work.
+/// Tooltip that counts up for attention states. The badge itself stays a single
+/// stable view; only a clear overlay lives in the 1 Hz timeline, so the badge is
+/// never re-evaluated or swapped (which would defeat its activity animation).
 private struct ElapsedHelp: ViewModifier {
   let visual: AgentBadgeVisual
   let agent: SkillAgent
   let since: Date?
 
   func body(content: Content) -> some View {
-    if let since {
-      TimelineView(.periodic(from: since, by: 1)) { context in
-        content.help(visual.describing(agent, since: since, now: context.date))
+    content.overlay {
+      TimelineView(PausableSchedule(start: since ?? .distantPast, isPaused: since == nil)) { context in
+        Color.clear
+          .contentShape(.rect)
+          .help(visual.describing(agent, since: since, now: context.date))
       }
-    } else {
-      content.help(visual.describing(agent))
     }
   }
 }

@@ -27,20 +27,32 @@ enum ElapsedFormatter {
   }
 }
 
+/// Ticks once a second from `start`, or yields a single entry when paused, so a
+/// view can keep one stable `TimelineView` whether or not it needs to tick.
+struct PausableSchedule: TimelineSchedule {
+  let start: Date
+  let isPaused: Bool
+
+  func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnySequence<Date> {
+    if isPaused { return AnySequence([startDate]) }
+    return AnySequence(PeriodicTimelineSchedule(from: start, by: 1).entries(from: startDate, mode: mode))
+  }
+}
+
 /// Self-ticking compact elapsed label. Ticks once a second via `TimelineView`,
-/// so the reducer never schedules display work. Pass `isTicking: false` to
-/// freeze (e.g. while the row is off screen or the state is not attention).
+/// so the reducer never schedules display work. `stateLabel` is the VoiceOver
+/// verb phrase ("waiting", "errored").
 struct ElapsedLabel: View {
   let since: Date
-  var isTicking = true
+  var stateLabel = "waiting"
 
   var body: some View {
-    TimelineView(.periodic(from: since, by: isTicking ? 1 : .infinity)) { context in
+    TimelineView(PausableSchedule(start: since, isPaused: false)) { context in
       Text(ElapsedFormatter.compact(from: since, to: context.date))
         .appFont(.caption)
         .monospacedDigit()
         .foregroundStyle(.secondary)
-        .accessibilityLabel("waiting \(ElapsedFormatter.spoken(from: since, to: context.date))")
+        .accessibilityLabel("\(stateLabel) \(ElapsedFormatter.spoken(from: since, to: context.date))")
     }
   }
 }

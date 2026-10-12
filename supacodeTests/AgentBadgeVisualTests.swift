@@ -24,7 +24,11 @@ struct AgentBadgeVisualTests {
   @Test func describingIncludesElapsedForAttentionStates() {
     let since = Date(timeIntervalSince1970: 0)
     let now = since.addingTimeInterval(252)
-    #expect(AgentBadgeVisual.awaitingInput.describing(.claude, since: since, now: now) == "\(SkillAgent.claude.displayName) awaiting input for 4m 12s")
+    let claude = SkillAgent.claude.displayName
+    #expect(
+      AgentBadgeVisual.awaitingInput.describing(.claude, since: since, now: now)
+        == "\(claude) awaiting input for 4m 12s"
+    )
     #expect(AgentBadgeVisual.error.describing(.codex, since: since, now: now) == "Codex stopped on an error 4m 12s ago")
     #expect(AgentBadgeVisual.normal.describing(.claude, since: since, now: now) == SkillAgent.claude.displayName)
   }

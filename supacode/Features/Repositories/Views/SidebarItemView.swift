@@ -613,7 +613,10 @@ private struct RunningAgentsBadgeContent: View, Equatable {
     HStack(spacing: 4) {
       AgentAvatarGroupView(instances: agents, size: 16)
       if showsElapsed, let since {
-        ElapsedLabel(since: since)
+        ElapsedLabel(
+          since: since,
+          stateLabel: agents.contains { $0.activity == .awaitingInput } ? "waiting" : "errored"
+        )
       }
     }
   }
