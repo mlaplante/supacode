@@ -101,6 +101,9 @@ struct SidebarItemFeature {
     var behindCount: Int?
     /// The base ref the counts were measured against, for the tooltip and menu.
     var syncBaseRef: String?
+    /// An ahead/behind probe has completed (even with no result), so `filesChanged`
+    /// stops re-probing; `branchChanged` still refreshes.
+    var hasProbedAheadBehind = false
     /// A rebase / merge is in flight; the row menu disables sync meanwhile.
     var isSyncing = false
     var pullRequest: ForgePullRequest?
@@ -185,8 +188,10 @@ struct SidebarItemFeature {
 
       case .aheadBehindChanged(let ahead, let behind, let base):
         let nextBehind: Int? = (behind ?? 0) == 0 ? nil : behind
-        guard state.aheadCount != ahead || state.behindCount != nextBehind || state.syncBaseRef != base
+        guard !state.hasProbedAheadBehind || state.aheadCount != ahead || state.behindCount != nextBehind
+          || state.syncBaseRef != base
         else { return .none }
+        state.hasProbedAheadBehind = true
         state.aheadCount = ahead
         state.behindCount = nextBehind
         state.syncBaseRef = base

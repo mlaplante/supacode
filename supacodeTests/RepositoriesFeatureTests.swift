@@ -12492,6 +12492,57 @@ struct RepositoriesFeatureTests {
     #expect(error.readableMessage == "fatal: bad ref")
   }
 
+  @Test func filesChangedProbesOnceWhenNoBaseResolves() async {
+    let probes = LockIsolated(0)
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.automaticWorktreeBaseRef = { _ in
+        probes.withValue { $0 += 1 }
+        return nil
+      }
+      $0.gitClient.lineChanges = { _ in (added: 0, removed: 0) }
+      $0.gitClient.branchName = { _ in "feature" }
+    }
+    await store.send(.worktreeInfoEvent(.filesChanged(worktreeID: worktree.id)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(probes.value == 1)
+    #expect(store.state.sidebarItems[id: worktree.id]?.hasProbedAheadBehind == true)
+    await store.send(.worktreeInfoEvent(.filesChanged(worktreeID: worktree.id)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(probes.value == 1)
+    await store.send(.worktreeInfoEvent(.branchChanged(worktreeID: worktree.id)))
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(probes.value == 2)
+  }
+
+  @Test func mergeSyncCallsMergeNotRebase() async {
+    let calls = LockIsolated<[String]>([])
+    let (store, worktree) = makeSyncStore {
+      $0.gitClient.fileStatus = { _ in .empty }
+      $0.gitClient.rebaseOnto = { _, _ in calls.withValue { $0.append("rebase") } }
+      $0.gitClient.mergeBaseRef = { _, base in calls.withValue { $0.append("merge \(base)") } }
+      $0.gitClient.automaticWorktreeBaseRef = { _ in "origin/main" }
+      $0.gitClient.aheadBehind = { _, _ in GitAheadBehind(ahead: 1, behind: 0) }
+      $0.gitClient.lineChanges = { _ in (added: 0, removed: 0) }
+    }
+    await store.send(
+      .sidebarItems(
+        .element(id: worktree.id, action: .aheadBehindChanged(ahead: 1, behind: 3, base: "origin/main"))))
+    await store.send(.syncWorktreeWithBase(worktreeID: worktree.id, operation: .merge))
+    await store.receive(\.syncWorktreeFinished)
+    await store.finish()
+    await store.skipReceivedActions()
+    #expect(calls.value == ["merge origin/main"])
+    #expect(store.state.sidebarItems[id: worktree.id]?.behindCount == nil)
+  }
+
+  @Test func readableSyncMessageFallsBackToFirstLineWithoutStderr() {
+    let error = GitSyncError.failed("stdout:\nCONFLICT in a.txt\nmore")
+    #expect(error.readableMessage == "CONFLICT in a.txt")
+  }
+
   private actor AsyncGate {
     var continuation: CheckedContinuation<Void, Never>?
     var isOpen = false

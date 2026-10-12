@@ -27,7 +27,11 @@ extension GitSyncError {
     case .conflict(let operation):
       return "\(operation.verb) stopped on conflicts. The \(operation.rawValue) was aborted and your branch is unchanged."
     case .failed(let raw):
-      return Self.firstStderrLine(in: raw) ?? raw
+      return Self.firstStderrLine(in: raw)
+        ?? raw.split(whereSeparator: \.isNewline)
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .first { !$0.isEmpty && $0 != "stdout:" && $0 != "stderr:" }
+        ?? raw
     }
   }
 

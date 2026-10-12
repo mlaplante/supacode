@@ -566,7 +566,7 @@ struct RepositoriesFeature {
     case worktreeBranchNameLoaded(worktreeID: Worktree.ID, name: String)
     case worktreeLineChangesLoaded(worktreeID: Worktree.ID, added: Int, removed: Int)
     case refreshAheadBehind(worktreeID: Worktree.ID)
-    case worktreeAheadBehindLoaded(worktreeID: Worktree.ID, result: GitAheadBehind?, base: String)
+    case worktreeAheadBehindLoaded(worktreeID: Worktree.ID, result: GitAheadBehind?, base: String?)
     case syncWorktreeWithBase(worktreeID: Worktree.ID, operation: GitSyncOperation)
     case syncWorktreeFinished(worktreeID: Worktree.ID, result: Result<Void, GitSyncError>)
     case refreshGithubIntegrationAvailability
@@ -2765,7 +2765,10 @@ struct RepositoriesFeature {
           } else {
             base = await gitClient.automaticWorktreeBaseRef(root)
           }
-          guard let base else { return }
+          guard let base else {
+            await send(.worktreeAheadBehindLoaded(worktreeID: worktreeID, result: nil, base: nil))
+            return
+          }
           let result = await gitClient.aheadBehind(url, base)
           await send(.worktreeAheadBehindLoaded(worktreeID: worktreeID, result: result, base: base))
         }
@@ -3615,7 +3618,7 @@ struct RepositoriesFeature {
           let worktreeURL = worktree.workingDirectory
           let gitClient = gitClient(for: worktree)
           // First paint of the behind count without waiting for a branch change.
-          let needsAheadBehind = state.sidebarItems[id: worktreeID]?.aheadCount == nil
+          let needsAheadBehind = state.sidebarItems[id: worktreeID]?.hasProbedAheadBehind == false
           // Coalesce overlapping diffs for the same worktree: a burst of
           // reconcile / FS events can't stack diff processes.
           let lineChanges: Effect<Action> = .run { send in
@@ -6724,8 +6727,6 @@ extension RepositoriesFeature.State {
     return .send(.sidebarItems(.element(id: worktreeID, action: .lifecycleChanged(lifecycle))))
   }
 
-  /// Row action dispatch for diff stats. 30 / 60 s polling re-emits the same
-  /// line counts on every tick; skip the dispatch when both fields match.
   /// Per-repo base ref override (same source worktree creation reads), if set.
   func syncBaseRefOverride(for worktree: Worktree) -> String? {
     guard let repositoryID = repositoryID(containing: worktree.id),
@@ -6739,6 +6740,8 @@ extension RepositoriesFeature.State {
     sidebarItems[id: worktreeID]?.canSync ?? false
   }
 
+  /// Row action dispatch for diff stats. 30 / 60 s polling re-emits the same
+  /// line counts on every tick; skip the dispatch when both fields match.
   func updateWorktreeLineChangesEffect(
     worktreeID: Worktree.ID,
     added: Int,

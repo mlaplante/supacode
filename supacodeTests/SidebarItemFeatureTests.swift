@@ -29,6 +29,7 @@ struct SidebarItemFeatureTests {
       $0.aheadCount = 2
       $0.behindCount = 4
       $0.syncBaseRef = "origin/main"
+      $0.hasProbedAheadBehind = true
     }
     await store.send(.aheadBehindChanged(ahead: 2, behind: 4, base: "origin/main"))
     await store.send(.aheadBehindChanged(ahead: 2, behind: 0, base: "origin/main")) {

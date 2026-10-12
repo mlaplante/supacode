@@ -436,10 +436,10 @@ extension SidebarItemFeature.Action {
     // row's resolved pull-request glyph into that cache.
     case .pullRequestChanged, .pullRequestDetailApplied:
       return [.selectedWorktreeSlice, .toolbarNotificationGroups]
-    // The row accessory reads the leaf store directly; the selection slice
-    // projects `syncBaseRef` / `canSync` for the multi-select context menu.
+    // The accessory and the context menu (`SidebarContextRow(store.state)`) both
+    // read the leaf store directly, so no cache holds these fields.
     case .aheadBehindChanged, .syncStateChanged:
-      return .sidebarSelectionSlice
+      return []
     case .diffStatsChanged, .pullRequestQueryStarted,
       .dragSessionChanged,
       .focusTerminalRequested, .focusTerminalConsumed:
