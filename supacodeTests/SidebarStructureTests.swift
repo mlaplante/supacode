@@ -473,7 +473,7 @@ struct SidebarStructureTests {
     // running) is the reverse of alphabetical, proving classification no longer
     // drives order.
     state.sidebarItems[id: charlie.id]?.agentSnapshot.hasError = true
-    state.sidebarItems[id: bravo.id]?.agentSnapshot.agents = [.init(agent: .claude, activity: .idle)]
+    state.sidebarItems[id: bravo.id]?.agentSnapshot.agents = [.init(agent: .claude, activity: .idle, since: .distantPast)]
     state.sidebarItems[id: alpha.id]?.runningScripts.append(.init(id: UUID(), tint: .blue))
 
     let structure = state.computeSidebarStructure(groupPinned: false, groupActive: true)

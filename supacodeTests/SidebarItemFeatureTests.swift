@@ -69,7 +69,8 @@ struct SidebarItemFeatureTests {
     }
     let instance = AgentPresenceFeature.AgentInstance(
       agent: .claude,
-      activity: .busy
+      activity: .busy,
+      since: .distantPast
     )
     await store.send(.agentSnapshotChanged(.init(agents: [instance], isWorking: true))) {
       $0.agentSnapshot = .init(agents: [instance], isWorking: true)
@@ -86,14 +87,14 @@ struct SidebarItemFeatureTests {
     let store = TestStore(initialState: makeState(name: "feature")) {
       SidebarItemFeature()
     }
-    let errored = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .error)
+    let errored = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .error, since: .distantPast)
     await store.send(.agentSnapshotChanged(.init(agents: [errored], hasError: true))) {
       $0.agentSnapshot = .init(agents: [errored], hasError: true)
     }
     #expect(store.state.hasAgentError)
 
     // A restart clears it and puts the row back to work.
-    let busy = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let busy = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     await store.send(.agentSnapshotChanged(.init(agents: [busy], isWorking: true))) {
       $0.agentSnapshot = .init(agents: [busy], isWorking: true)
     }
@@ -193,7 +194,7 @@ struct SidebarItemFeatureTests {
     #expect(!store.state.isTaskRunning)
 
     // An agent starting work shimmers the row even while the script keeps running.
-    let busy = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let busy = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     await store.send(.agentSnapshotChanged(.init(agents: [busy], isWorking: true))) {
       $0.agentSnapshot = .init(agents: [busy], isWorking: true)
     }

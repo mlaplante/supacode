@@ -418,10 +418,10 @@ struct SidebarBranchNestingTests {
 
   @Test func aggregatedIndicators_capsAt3Agents() {
     let agents: [AgentPresenceFeature.AgentInstance] = [
-      .init(agent: .claude, activity: .busy),
-      .init(agent: .codex, activity: .idle),
-      .init(agent: .kiro, activity: .awaitingInput),
-      .init(agent: .pi, activity: .busy),
+      .init(agent: .claude, activity: .busy, since: .distantPast),
+      .init(agent: .codex, activity: .idle, since: .distantPast),
+      .init(agent: .kiro, activity: .awaitingInput, since: .distantPast),
+      .init(agent: .pi, activity: .busy, since: .distantPast),
     ]
     let snapshots: [SidebarBranchNesting.LeafIndicatorSnapshot] = [
       .init(hasUnseenNotifications: false, runningScriptColors: [], agents: Array(agents.prefix(2))),

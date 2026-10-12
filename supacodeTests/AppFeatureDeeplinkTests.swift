@@ -3747,7 +3747,7 @@ struct AppFeatureDeeplinkTests {
     var repositoriesState = makeRepositoriesState(worktree: worktree)
     repositoriesState.reconcileSidebarForTesting()
     repositoriesState.sidebarItems[id: worktree.id]?.agentSnapshot.agents = [
-      .init(agent: .claude, activity: .busy)
+      .init(agent: .claude, activity: .busy, since: .distantPast)
     ]
     let store = TestStore(
       initialState: AppFeature.State(

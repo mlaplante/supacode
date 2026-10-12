@@ -50,7 +50,7 @@ struct MenuBarNotificationListTests {
     var state = RepositoriesFeature.State(
       reconciledRepositories: [makeRepository(worktrees: [working])]
     )
-    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     state.sidebarItems[id: working.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
     state.reconcileSidebarForTesting()
 
@@ -68,7 +68,7 @@ struct MenuBarNotificationListTests {
       reconciledRepositories: [makeRepository(worktrees: [hoisted])]
     )
     // Unread plus a tracked agent classifies as Active, so the row is hoisted.
-    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     state.sidebarItems[id: hoisted.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
     setRowNotifications(&state, id: hoisted.id, notifications: [makeNotification(isRead: false)])
     state.reconcileSidebarForTesting()
@@ -117,7 +117,7 @@ struct MenuBarNotificationListTests {
         sidebar.sections[Repository.ID("/tmp/repo/"), default: .init()].title = "Pretty"
         sidebar.sections[Repository.ID("/tmp/repo/"), default: .init()].color = .teal
       }
-      let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+      let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
       state.sidebarItems[id: working.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
       state.reconcileSidebarForTesting()
 
@@ -153,7 +153,7 @@ struct MenuBarNotificationListTests {
       state.$sidebar.withLock { sidebar in
         sidebar.insert(worktree: pinned.id, in: Repository.ID("/tmp/repo/"), bucket: .pinned)
       }
-      let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+      let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
       state.sidebarItems[id: hot.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
       // Both the Active row and the Pinned row are also unread.
       setRowNotifications(&state, id: hot.id, notifications: [makeNotification(isRead: false)])
@@ -219,7 +219,7 @@ struct MenuBarNotificationListTests {
     state.$sidebar.withLock { sidebar in
       sidebar.insert(worktree: pinned.id, in: Repository.ID("/tmp/repo/"), bucket: .pinned)
     }
-    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     state.sidebarItems[id: working.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
     setRowNotifications(&state, id: noisy.id, notifications: [makeNotification(isRead: false)])
     state.reconcileSidebarForTesting()
@@ -338,7 +338,7 @@ struct MenuBarNotificationListTests {
     // Agent activity raises only `.sidebarStructure`, so the cache must key off
     // that flag too, or a row the agent hoists to Active would never reach the
     // menu. The row moves from Unread to Active once the agent lands.
-    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy)
+    let instance = AgentPresenceFeature.AgentInstance(agent: .claude, activity: .busy, since: .distantPast)
     state.sidebarItems[id: worktree.id]?.agentSnapshot = .init(agents: [instance], isWorking: true)
     state.applyPostReduceCacheRecomputes(.sidebarStructure)
 
