@@ -1450,6 +1450,8 @@ struct AppFeatureCommandAckTests {
         repositories: repositoriesState, settings: SettingsFeature.State())
     ) {
       AppFeature()
+    } withDependencies: {
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
     }
     store.exhaustivity = .off
     let (readFD, writeFD) = makePipe()
@@ -1970,6 +1972,7 @@ struct AppFeatureCommandAckTests {
       $0.terminalClient.surfaceExists = { _, _, _ in tabExists }
       $0.terminalClient.surfaceExistsInWorktree = { _, _ in tabExists }
       $0.terminalClient.send = { _ in }
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
       extraDependencies(&$0)
     }
     store.exhaustivity = .off

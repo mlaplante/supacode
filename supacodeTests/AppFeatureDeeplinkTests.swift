@@ -441,6 +441,8 @@ struct AppFeatureDeeplinkTests {
       )
     ) {
       AppFeature()
+    } withDependencies: {
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
     }
     store.exhaustivity = .off
 
@@ -2486,6 +2488,7 @@ struct AppFeatureDeeplinkTests {
     ) {
       AppFeature()
     } withDependencies: {
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
       let worktreeID = worktree.id
       $0[DeeplinkClient.self].parse = { _ in
         let current = callCount.withValue { value -> Int in
@@ -3501,6 +3504,8 @@ struct AppFeatureDeeplinkTests {
       )
     ) {
       AppFeature()
+    } withDependencies: {
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
     }
     store.exhaustivity = .off
     return (store, repositoryID)
@@ -3518,6 +3523,7 @@ struct AppFeatureDeeplinkTests {
       $0.terminalClient.tabExists = { _, _ in true }
       $0.terminalClient.surfaceExists = { _, _, _ in true }
       $0.terminalClient.surfaceExistsInWorktree = { _, _ in true }
+      $0.date = .constant(Date(timeIntervalSince1970: 0))
     }
     store.exhaustivity = .off
     return store
