@@ -65,9 +65,9 @@ struct SkillAgentTests {
     // Varying rows, authored from each agent's installed hook events.
     #expect(
       SkillAgent.allCases.filter { $0.supports(.inputNeededBadge) }
-        == [.claude, .copilot, .grok, .kimi, .opencode])
+        == [.claude, .codex, .copilot, .grok, .kimi, .opencode])
     #expect(SkillAgent.allCases.filter { $0.supports(.errorDetection) } == [.antigravity, .claude])
-    #expect(SkillAgent.allCases.filter { $0.supports(.compactionBadge) } == [.claude])
+    #expect(SkillAgent.allCases.filter { $0.supports(.compactionBadge) } == [.claude, .codex])
     #expect(SkillAgent.allCases.filter { !$0.supports(.notifications) } == [.opencode])
     #expect(SkillAgent.allCases.filter { !$0.supports(.customFolder) } == [.antigravity, .kiro])
   }
@@ -266,5 +266,11 @@ struct SkillAgentTests {
         atPath: home.appending(path: ".gemini/antigravity-cli/skills/supacode-cli/SKILL.md").path(percentEncoded: false)
       )
     )
+  }
+
+  @Test func codexReportsInputNeededAndCompactionAfterHookParity() {
+    #expect(SkillAgent.codex.supports(.inputNeededBadge))
+    #expect(SkillAgent.codex.supports(.compactionBadge))
+    #expect(!SkillAgent.codex.supports(.errorDetection))
   }
 }
