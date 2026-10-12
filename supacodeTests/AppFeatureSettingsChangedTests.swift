@@ -30,6 +30,7 @@ struct AppFeatureSettingsChangedTests {
     await store.receive(\.repositories.setMergedWorktreeAction) {
       $0.repositories.mergedWorktreeAction = .archive
     }
+    await store.receive(\.repositories.reclassifyAllStale)
     await store.receive(\.repositories.setMoveNotifiedWorktreeToTop) {
       $0.repositories.moveNotifiedWorktreeToTop = true
     }

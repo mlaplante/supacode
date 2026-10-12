@@ -10,6 +10,7 @@ import OrderedCollections
 enum WindowTitle {
   static let appName = "Supacode"
   static let archivedLabel = "Archive"
+  static let staleLabel = "Stale Worktrees"
 
   static func format(repo: String, tab: String?) -> String {
     guard let tab, !tab.isEmpty else { return repo }
@@ -24,6 +25,8 @@ enum WindowTitle {
     switch repositories.selection {
     case .archivedWorktrees:
       return archivedLabel
+    case .staleWorktrees:
+      return staleLabel
     case .worktree(let worktreeID):
       return worktreeTitle(
         worktreeID: worktreeID,

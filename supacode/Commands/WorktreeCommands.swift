@@ -102,6 +102,11 @@ private struct WorktreeMainMenu: Commands {
       .appKeyboardShortcut(archived)
       .help("Archived Worktrees (\(archived?.display ?? "none"))")
       .disabled(!snapshot.isInitialLoadComplete)
+      Button("Review Stale Worktrees", systemImage: "clock.badge.xmark") {
+        store.send(.repositories(.selectStaleWorktrees))
+      }
+      .help("Review worktrees with nothing on them or untouched for a while")
+      .disabled(!snapshot.isInitialLoadComplete)
       Divider()
       Button("Archive Worktree…", systemImage: "archivebox") {
         archiveWorktreeAction?()

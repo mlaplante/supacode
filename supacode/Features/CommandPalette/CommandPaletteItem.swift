@@ -83,6 +83,7 @@ struct CommandPaletteItem: Identifiable, Equatable {
     case customizeRepositoryAppearance(Repository.ID)
     case customizeWorktreeAppearance(Worktree.ID, Repository.ID)
     case viewArchivedWorktrees
+    case viewStaleWorktrees
     case jumpToNextAwaiting
     case refreshWorktrees
     case ghosttyCommand(String)
@@ -106,7 +107,7 @@ struct CommandPaletteItem: Identifiable, Equatable {
   var isGlobal: Bool {
     switch kind {
     case .checkForUpdates, .openRepository, .addRemoteRepository, .openSettings, .newWorktree,
-      .viewArchivedWorktrees, .jumpToNextAwaiting, .refreshWorktrees:
+      .viewArchivedWorktrees, .viewStaleWorktrees, .jumpToNextAwaiting, .refreshWorktrees:
       true
     case .ghosttyCommand, .toggleWindowMode, .layoutCommand:
       false
@@ -135,7 +136,7 @@ struct CommandPaletteItem: Identifiable, Equatable {
   var isRootAction: Bool {
     switch kind {
     case .checkForUpdates, .openRepository, .addRemoteRepository, .openSettings, .newWorktree,
-      .viewArchivedWorktrees, .jumpToNextAwaiting, .refreshWorktrees:
+      .viewArchivedWorktrees, .viewStaleWorktrees, .jumpToNextAwaiting, .refreshWorktrees:
       true
     case .ghosttyCommand, .toggleWindowMode, .layoutCommand:
       false
@@ -170,6 +171,7 @@ struct CommandPaletteItem: Identifiable, Equatable {
     case .openSettings: AppShortcuts.openSettings
     case .newWorktree: AppShortcuts.newWorktree
     case .viewArchivedWorktrees: AppShortcuts.archivedWorktrees
+    case .viewStaleWorktrees: nil
     case .jumpToNextAwaiting: AppShortcuts.jumpToNextAwaiting
     case .refreshWorktrees: AppShortcuts.refreshWorktrees
     case .ghosttyCommand: nil
