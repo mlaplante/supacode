@@ -136,6 +136,7 @@ struct AppFeatureSettingsChangedTests {
       AppFeature()
     } withDependencies: {
       $0.continuousClock = clock
+      $0.date = .constant(.distantPast)
       $0.sidebarStructureAutoRecompute = false
       $0.terminalClient.saveLayoutsWithAgents = { _ in }
       $0.terminalClient.send = { _ in }
@@ -148,7 +149,8 @@ struct AppFeatureSettingsChangedTests {
     ) {
       $0.repositories.sidebarItems[id: worktree.id]?.agentSnapshot = .init(
         agents: [agent],
-        isWorking: true
+        isWorking: true,
+        since: .distantPast
       )
     }
     await clock.advance(by: .seconds(1))
@@ -308,6 +310,7 @@ struct AppFeatureSettingsChangedTests {
       AppFeature()
     } withDependencies: {
       $0.continuousClock = ImmediateClock()
+      $0.date = .constant(.distantPast)
       $0.terminalClient.saveLayoutsWithAgents = { _ in }
     }
     store.exhaustivity = .off
