@@ -400,12 +400,13 @@ struct PaneStripView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       // Tab split zones over the whole content region, so a dormant pane
-      // still takes tab drops. They only hit-test during a tab drag, so file
-      // drags reach the terminal beneath the rest of the time.
+      // still takes tab drops. They mount only during a tab drag: SwiftUI
+      // registers each zone's drop view for `public.data` (the tab type's
+      // parent), so an idle zone swallows Finder file drags meant for the
+      // terminal beneath, and `allowsHitTesting` does not unregister it.
       .overlay {
-        if context == .embedded, let dragModel {
+        if context == .embedded, let dragModel, dragModel.isTabDragActive {
           PaneSplitDropZones(pane: pane, store: store, dragModel: dragModel)
-            .allowsHitTesting(dragModel.isTabDragActive)
         }
       }
       // Focus-follows-mouse. Click-through sensor over the content region only,
@@ -540,9 +541,8 @@ private struct WindowedPanePlaceholderView: View {
 
 /// Edge drop zones over a pane's content: dropping a dragged tab on an edge
 /// splits the pane toward it, previewing the half the new pane will occupy.
-/// The zones register only the private tab-drag payload, but SwiftUI still
-/// claims any drag over them, so the caller disables their hit testing outside
-/// a tab drag to let file drags reach the terminal beneath.
+/// SwiftUI registers the zones for the tab type's `public.data` parent, so they
+/// would claim file drags too; the caller mounts them only during a tab drag.
 private struct PaneSplitDropZones: View {
   let pane: Pane
   let store: StoreOf<LayoutFeature>
