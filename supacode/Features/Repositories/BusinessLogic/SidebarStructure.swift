@@ -605,6 +605,10 @@ extension RepositoriesFeature.Action {
     case .worktreePullRequestDetailLoaded:
       return []
 
+    // Only re-dispatches the archive / delete action, which declares its own.
+    case .mergedWorktreeHeadChecked:
+      return []
+
     // Palette items rebuild on demand; no row-derived cache reads the forge.
     // Teardown clears rows via per-row dispatches that declare their own.
     case .repositoryForgeResolved, .forgeIntegrationDisabled:

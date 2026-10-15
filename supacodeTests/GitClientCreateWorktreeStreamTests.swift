@@ -498,6 +498,33 @@ struct GitClientUpstreamTests {
     }
   }
 
+  @Test func headIsContainedProbesAncestryFromTheWorktree() async {
+    let log = InvocationLog()
+    let client = GitClient(shell: Self.shell(log: log) { _ in ShellOutput(stdout: "", stderr: "", exitCode: 0) })
+
+    let contained = await client.headIsContained(in: "abc123", at: URL(fileURLWithPath: "/tmp/repo/feature"))
+
+    #expect(contained)
+    #expect(
+      log.invocations == [
+        ["git", "-C", "/tmp/repo/feature", "merge-base", "--is-ancestor", "HEAD", "abc123"]
+      ]
+    )
+  }
+
+  @Test func headIsContainedIsFalseWhenTheProbeFails() async {
+    // Exit 1: HEAD isn't an ancestor. Exit 128 (unknown commit) takes the same path.
+    let client = GitClient(
+      shell: Self.shell(log: InvocationLog()) { _ in
+        throw ShellClientError(command: "git merge-base", stdout: "", stderr: "", exitCode: 1)
+      }
+    )
+
+    let contained = await client.headIsContained(in: "abc123", at: URL(fileURLWithPath: "/tmp/repo/feature"))
+
+    #expect(!contained)
+  }
+
   @Test func upstreamBranchExistsChecksLocalThenRemoteTrackingRefs() async throws {
     let log = InvocationLog()
     let client = GitClient(

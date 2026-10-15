@@ -743,6 +743,7 @@ nonisolated private func makeBatchPullRequestsQuery(
           updatedAt
           mergedAt
           headRefName
+          headRefOid
           baseRefName
           commits {
             totalCount

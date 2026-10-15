@@ -85,6 +85,7 @@ struct GithubBatchPullRequestsTests {
                   "mergedAt": "2025-01-02T03:04:05Z",
                   "url": "https://github.com/octo/repo/pull/7",
                   "headRefName": "feature-a",
+                  "headRefOid": "0123456789abcdef0123456789abcdef01234567",
                   "headRepository": {
                     "name": "repo",
                     "owner": { "login": "octo" }
@@ -129,6 +130,9 @@ struct GithubBatchPullRequestsTests {
     #expect(prs["feature-a"]?.mergedAt == expected)
     // An absent mergedAt key (open PRs) decodes to nil.
     #expect(prs["feature-b"]?.mergedAt == nil)
+    // The head commit identifies which branch incarnation the PR belongs to.
+    #expect(prs["feature-a"]?.headRefOid == "0123456789abcdef0123456789abcdef01234567")
+    #expect(prs["feature-b"]?.headRefOid == nil)
   }
 
   @Test func ignoresForkPRWhenBaseRefMatchesBranch() throws {

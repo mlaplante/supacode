@@ -77,6 +77,7 @@ extension ForgePullRequest {
       mergedAt: mergedAt,
       url: url,
       headRefName: headRefName,
+      headRefOid: headRefOid,
       baseRefName: baseRefName,
       commitsCount: commitsCount,
       authorLogin: authorLogin,

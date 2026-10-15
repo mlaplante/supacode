@@ -39,6 +39,7 @@ private nonisolated let mergeRequestListJSON = """
       "web_url": "https://gitlab.com/group/sub/proj/-/merge_requests/11",
       "source_branch": "shipped",
       "target_branch": "main",
+      "sha": "fedcba9876543210fedcba9876543210fedcba98",
       "updated_at": "2026-07-20T10:00:00.000Z",
       "merged_at": "2026-07-21T09:30:00.000Z",
       "author": {"username": "dev"}
@@ -83,6 +84,7 @@ struct GitLabCLIClientTests {
     // Merged proposals must surface (state-inclusive sweep), with mergedAt.
     #expect(results["shipped"]?.state == .merged)
     #expect(results["shipped"]?.mergedAt != nil)
+    #expect(results["shipped"]?.headRefOid == "fedcba9876543210fedcba9876543210fedcba98")
     #expect(results["absent"] == nil)
   }
 

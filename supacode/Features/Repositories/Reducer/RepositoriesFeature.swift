@@ -592,6 +592,12 @@ struct RepositoriesFeature {
       repositoryID: Repository.ID,
       pullRequestsByWorktreeID: [Worktree.ID: ForgePullRequest?]
     )
+    case mergedWorktreeHeadChecked(
+      Worktree.ID,
+      repositoryID: Repository.ID,
+      action: MergedWorktreeAction,
+      isContained: Bool
+    )
     case setGithubIntegrationEnabled(Bool)
     /// Installed editors resolved by `AppFeature`'s LaunchServices sweep. Mirrored
     /// in through an action (not a direct child-state write) so the post-reduce
@@ -2918,8 +2924,7 @@ struct RepositoriesFeature {
           return .none
         }
         let branchSnapshot = state.inFlightPullRequestBranchSnapshotsByRepositoryID[repositoryID] ?? [:]
-        var archiveWorktreeIDs: [Worktree.ID] = []
-        var deleteWorktreeIDs: [Worktree.ID] = []
+        var headCheckEffects: [Effect<Action>] = []
         var rowEffects: [Effect<Action>] = []
         // Queried-but-missing worktrees must still clear their row watermark.
         let dispatchIDs = Set(branchSnapshot.keys).union(pullRequestsByWorktreeID.keys)
@@ -2941,25 +2946,35 @@ struct RepositoriesFeature {
           )
           let mergedLifecycle = state.sidebarItems[id: worktreeID]?.lifecycle ?? .idle
           // Don't let a stale merge on a reused branch name auto-close a freshly recreated worktree (#794).
+          // The date check alone misses a proposal that merges after the name was reused, so the
+          // worktree's HEAD must also be contained in the proposal's head commit before closing it.
           if resolvedMergedAction != .ignore,
             !previousMerged,
             nextMerged,
             let mergedAt = pullRequest?.mergedAt,
             let createdAt = worktree.createdAt,
             mergedAt > createdAt,
+            let headRefOid = pullRequest?.headRefOid,
             !state.isMainWorktree(worktree),
             !state.isWorktreeArchived(worktreeID),
             mergedLifecycle != .deleting,
             mergedLifecycle != .deletingScript
           {
-            switch resolvedMergedAction {
-            case .archive:
-              archiveWorktreeIDs.append(worktreeID)
-            case .delete:
-              deleteWorktreeIDs.append(worktreeID)
-            case .ignore:
-              break
-            }
+            let client = gitClient(for: worktree)
+            let workingDirectory = worktree.workingDirectory
+            headCheckEffects.append(
+              .run { send in
+                let isContained = await client.headIsContained(headRefOid, workingDirectory)
+                await send(
+                  .mergedWorktreeHeadChecked(
+                    worktreeID,
+                    repositoryID: repositoryID,
+                    action: resolvedMergedAction,
+                    isContained: isContained
+                  )
+                )
+              }
+            )
           }
         }
         let detailEffect = pullRequestDetailEffect(
@@ -2971,12 +2986,37 @@ struct RepositoriesFeature {
         let effects: [Effect<Action>] =
           rowEffects
           + [detailEffect]
-          + archiveWorktreeIDs.map { .send(.archiveWorktreeConfirmed($0, repositoryID)) }
-          + deleteWorktreeIDs.map { .send(.deleteSidebarItemConfirmed($0, repositoryID)) }
+          + headCheckEffects
         guard !effects.isEmpty else {
           return .none
         }
         return .merge(effects)
+
+      case .mergedWorktreeHeadChecked(let worktreeID, let repositoryID, let action, let isContained):
+        guard isContained else {
+          repositoriesLogger.info(
+            "Skipping merged auto-close for \(worktreeID): HEAD is not part of the merged proposal."
+          )
+          return .none
+        }
+        // Re-check after the git probe: the worktree may have been archived or
+        // removed while it ran.
+        let lifecycle = state.sidebarItems[id: worktreeID]?.lifecycle ?? .idle
+        guard state.repositories[id: repositoryID]?.worktrees[id: worktreeID] != nil,
+          !state.isWorktreeArchived(worktreeID),
+          lifecycle != .deleting,
+          lifecycle != .deletingScript
+        else {
+          return .none
+        }
+        switch action {
+        case .archive:
+          return .send(.archiveWorktreeConfirmed(worktreeID, repositoryID))
+        case .delete:
+          return .send(.deleteSidebarItemConfirmed(worktreeID, repositoryID))
+        case .ignore:
+          return .none
+        }
 
       case .openSelectedWorktreePullRequest:
         // A folder isn't a git repository, so it has no branch or pull request to look up.
@@ -4883,8 +4923,9 @@ struct RepositoriesFeature {
 
       case .refreshGithubIntegrationAvailability, .githubIntegrationAvailabilityUpdated,
         .repositoryPullRequestRefreshCompleted, .worktreeBranchNameLoaded, .worktreeLineChangesLoaded,
-        .repositoryPullRequestsLoaded, .repositoryForgeResolved, .worktreePullRequestDetailLoaded,
-        .forgeIntegrationDisabled, .pullRequestAction, .setGithubIntegrationEnabled, .setMergedWorktreeAction,
+        .repositoryPullRequestsLoaded, .mergedWorktreeHeadChecked, .repositoryForgeResolved,
+        .worktreePullRequestDetailLoaded, .forgeIntegrationDisabled, .pullRequestAction,
+        .setGithubIntegrationEnabled, .setMergedWorktreeAction,
         .openSelectedWorktreePullRequest, .pullRequestOpenFetchLoaded, .pullRequestOpenFetchFailed,
         .setAutoDeleteArchivedWorktreesAfterDays, .autoDeleteExpiredArchivedWorktrees, .setMoveNotifiedWorktreeToTop,
         .setInstalledOpenActions, .openActionSettingsChanged, .resolveOpenActions, .openActionsResolved,

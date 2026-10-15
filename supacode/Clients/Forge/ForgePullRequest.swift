@@ -14,6 +14,9 @@ nonisolated struct ForgePullRequest: Equatable, Hashable {
   let mergedAt: Date?
   let url: String
   let headRefName: String?
+  /// Commit the proposal's head ref points at. Identifies which branch
+  /// incarnation the proposal belongs to when a branch name is reused.
+  let headRefOid: String?
   let baseRefName: String?
   let commitsCount: Int?
   let authorLogin: String?
@@ -40,6 +43,7 @@ nonisolated struct ForgePullRequest: Equatable, Hashable {
     mergedAt: Date?,
     url: String,
     headRefName: String?,
+    headRefOid: String? = nil,
     baseRefName: String?,
     commitsCount: Int?,
     authorLogin: String?,
@@ -61,6 +65,7 @@ nonisolated struct ForgePullRequest: Equatable, Hashable {
     self.mergedAt = mergedAt
     self.url = url
     self.headRefName = headRefName
+    self.headRefOid = headRefOid
     self.baseRefName = baseRefName
     self.commitsCount = commitsCount
     self.authorLogin = authorLogin

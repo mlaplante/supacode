@@ -104,6 +104,9 @@ struct GitClientDependency: Sendable {
   var setUpstreamBranch: @Sendable (_ branch: String, _ upstream: String, _ repoRoot: URL) async throws -> Void
   var unsetUpstreamBranch: @Sendable (_ branch: String, _ repoRoot: URL) async throws -> Void
   var upstreamBranchExists: @Sendable (_ ref: String, _ repoRoot: URL) async throws -> Bool
+  /// Whether the worktree's `HEAD` is `commit` or an ancestor of it. `false` on
+  /// an unknown commit or a failed probe.
+  var headIsContained: @Sendable (_ commit: String, _ worktreeURL: URL) async -> Bool
 }
 
 extension GitClientDependency: DependencyKey {
@@ -299,6 +302,9 @@ extension GitClientDependency: DependencyKey {
       },
       upstreamBranchExists: { ref, repoRoot in
         try await GitClient(shell: shell).upstreamBranchExists(ref, for: repoRoot)
+      },
+      headIsContained: { commit, worktreeURL in
+        await GitClient(shell: shell).headIsContained(in: commit, at: worktreeURL)
       }
     )
   }
@@ -322,6 +328,9 @@ extension GitClientDependency: DependencyKey {
     value.fileStatus = { _ in nil }
     // No ahead/behind probe by default so unstubbed reducer tests never shell out.
     value.aheadBehind = { _, _ in nil }
+    // Treat fixture worktrees as matching the proposal head so the merged-PR
+    // auto-close tests keep firing; reused-branch tests override this.
+    value.headIsContained = { _, _ in true }
     // `liveValue` shells out to real `git clone`; a no-op default keeps an
     // unstubbed test from cloning over the network. Clone tests override this.
     value.cloneStream = { _, _, _, _ in

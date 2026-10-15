@@ -602,6 +602,20 @@ struct GitClient {
   /// `git branch --set-upstream-to` accepts; branch-qualified refs are checked
   /// as is. Throws when the check itself fails, so a missing branch is never
   /// conflated with an unverifiable one.
+  /// Whether the worktree's `HEAD` is `commit` or one of its ancestors, i.e.
+  /// nothing on the worktree is missing from that commit. `false` when the
+  /// commit isn't known locally or the probe fails, so callers fail safe.
+  nonisolated func headIsContained(in commit: String, at worktreeURL: URL) async -> Bool {
+    let path = worktreeURL.path(percentEncoded: false)
+    let env = URL(fileURLWithPath: "/usr/bin/env")
+    do {
+      _ = try await shell.run(env, ["git", "-C", path, "merge-base", "--is-ancestor", "HEAD", commit], nil)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   nonisolated func upstreamBranchExists(_ ref: String, for repoRoot: URL) async throws -> Bool {
     let path = repoRoot.path(percentEncoded: false)
     let isQualifiedBranchRef = ref.hasPrefix("refs/heads/") || ref.hasPrefix("refs/remotes/")

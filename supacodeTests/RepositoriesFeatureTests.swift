@@ -6337,6 +6337,116 @@ struct RepositoriesFeatureTests {
     await store.finish()
   }
 
+  // A proposal that merges after its branch name was reused must not close the new worktree,
+  // whose HEAD is not part of the merged proposal.
+  @Test func repositoryPullRequestsLoadedSkipsAutoActionWhenHeadNotInMergedProposal() async {
+    let repoRoot = "/tmp/repo"
+    let mainWorktree = makeWorktree(id: repoRoot, name: "main", repoRoot: repoRoot)
+    let featureWorktree = makeWorktree(
+      id: "\(repoRoot)/feature",
+      name: "feature",
+      repoRoot: repoRoot,
+      createdAt: Date(timeIntervalSince1970: 900_000)
+    )
+    let repository = makeRepository(id: repoRoot, worktrees: [mainWorktree, featureWorktree])
+    var state = makeState(repositories: [repository])
+    state.mergedWorktreeAction = .delete
+    state.reconcileSidebarForTesting()
+    let checkedCommits = LockIsolated<[String]>([])
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.gitClient.headIsContained = { commit, _ in
+        checkedCommits.withValue { $0.append(commit) }
+        return false
+      }
+    }
+    let mergedPullRequest = makePullRequest(
+      state: .merged,
+      headRefName: featureWorktree.name,
+      mergedAt: Date(timeIntervalSince1970: 950_000),
+      headRefOid: "previous-incarnation-head"
+    )
+
+    await store.send(
+      .repositoryPullRequestsLoaded(
+        repositoryID: repository.id,
+        pullRequestsByWorktreeID: [featureWorktree.id: mergedPullRequest]
+      )
+    )
+    await store.receive(\.sidebarItems) {
+      $0.sidebarItems[id: featureWorktree.id]?.pullRequest = mergedPullRequest
+    }
+    await store.receive(\.mergedWorktreeHeadChecked)
+    await store.finish()
+    #expect(checkedCommits.value == ["previous-incarnation-head"])
+  }
+
+  @Test func repositoryPullRequestsLoadedSkipsAutoActionWhenHeadRefOidMissing() async {
+    let repoRoot = "/tmp/repo"
+    let mainWorktree = makeWorktree(id: repoRoot, name: "main", repoRoot: repoRoot)
+    let featureWorktree = makeWorktree(
+      id: "\(repoRoot)/feature",
+      name: "feature",
+      repoRoot: repoRoot,
+      createdAt: Date(timeIntervalSince1970: 900_000)
+    )
+    let repository = makeRepository(id: repoRoot, worktrees: [mainWorktree, featureWorktree])
+    var state = makeState(repositories: [repository])
+    state.mergedWorktreeAction = .delete
+    state.reconcileSidebarForTesting()
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    }
+    let mergedPullRequest = makePullRequest(
+      state: .merged,
+      headRefName: featureWorktree.name,
+      mergedAt: Date(timeIntervalSince1970: 950_000),
+      headRefOid: nil
+    )
+
+    await store.send(
+      .repositoryPullRequestsLoaded(
+        repositoryID: repository.id,
+        pullRequestsByWorktreeID: [featureWorktree.id: mergedPullRequest]
+      )
+    )
+    await store.receive(\.sidebarItems) {
+      $0.sidebarItems[id: featureWorktree.id]?.pullRequest = mergedPullRequest
+    }
+    await store.finish()
+  }
+
+  @Test func mergedWorktreeHeadCheckedSkipsWorktreeArchivedDuringProbe() async {
+    let repoRoot = "/tmp/repo"
+    let mainWorktree = makeWorktree(id: repoRoot, name: "main", repoRoot: repoRoot)
+    let featureWorktree = makeWorktree(id: "\(repoRoot)/feature", name: "feature", repoRoot: repoRoot)
+    let repository = makeRepository(id: repoRoot, worktrees: [mainWorktree, featureWorktree])
+    var state = makeState(repositories: [repository])
+    state.reconcileSidebarForTesting()
+    state.$sidebar.withLock { sidebar in
+      sidebar.insert(
+        worktree: featureWorktree.id,
+        in: repository.id,
+        bucket: .archived,
+        item: .init(archivedAt: Date(timeIntervalSince1970: 1_000_000))
+      )
+    }
+    let store = TestStore(initialState: state) {
+      RepositoriesFeature()
+    }
+
+    await store.send(
+      .mergedWorktreeHeadChecked(
+        featureWorktree.id,
+        repositoryID: repository.id,
+        action: .delete,
+        isContained: true
+      )
+    )
+    await store.finish()
+  }
+
   @Test func repositoryPullRequestsLoadedSkipsAutoActionWhenMergedAtMissing() async {
     let repoRoot = "/tmp/repo"
     let mainWorktree = makeWorktree(id: repoRoot, name: "main", repoRoot: repoRoot)
@@ -9612,7 +9722,8 @@ struct RepositoriesFeatureTests {
     state: PullRequestState,
     headRefName: String? = nil,
     number: Int = 1,
-    mergedAt: Date? = nil
+    mergedAt: Date? = nil,
+    headRefOid: String? = "0123456789abcdef0123456789abcdef01234567"
   ) -> ForgePullRequest {
     ForgePullRequest(
       number: number,
@@ -9628,6 +9739,7 @@ struct RepositoriesFeatureTests {
       mergedAt: mergedAt,
       url: "https://example.com/pull/\(number)",
       headRefName: headRefName,
+      headRefOid: headRefOid,
       baseRefName: "main",
       commitsCount: 1,
       authorLogin: "khoi",

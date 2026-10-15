@@ -10,6 +10,8 @@ nonisolated struct GitLabMergeRequest: Decodable, Equatable {
   let webUrl: String
   let sourceBranch: String?
   let targetBranch: String?
+  /// Diff head SHA of the source branch.
+  let sha: String?
   let updatedAt: Date?
   let mergedAt: Date?
   let author: Author?
@@ -28,6 +30,7 @@ nonisolated struct GitLabMergeRequest: Decodable, Equatable {
     case webUrl = "web_url"
     case sourceBranch = "source_branch"
     case targetBranch = "target_branch"
+    case sha
     case updatedAt = "updated_at"
     case mergedAt = "merged_at"
     case author
@@ -50,6 +53,7 @@ nonisolated struct GitLabMergeRequest: Decodable, Equatable {
       mergedAt: mergedAt,
       url: webUrl,
       headRefName: sourceBranch,
+      headRefOid: sha,
       baseRefName: targetBranch,
       commitsCount: nil,
       authorLogin: author?.username,
