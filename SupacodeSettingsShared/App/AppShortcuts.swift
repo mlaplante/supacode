@@ -40,7 +40,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
       .openPullRequest, .copyPath, .runScript, .stopRunScript, .renameTab, .toggleWindowMode,
       .newTerminalTab, .closeTab, .splitRight, .splitLeft, .splitDown, .splitUp,
       .focusSplitLeft, .focusSplitRight, .focusSplitUp, .focusSplitDown,
-      .toggleSplitZoom, .equalizeSplits, .jumpToLatestUnread,
+      .toggleSplitZoom, .equalizeSplits, .jumpToLatestUnread, .jumpToNextAwaiting,
       .togglePullRequestInspector, .toggleFilesInspector, .toggleNotificationsInspector,
       .startSearch, .findNext, .findPrevious, .useSelectionForFind:
       true
