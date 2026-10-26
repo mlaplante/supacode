@@ -25,6 +25,8 @@ nonisolated struct ForgePullRequest: Equatable, Hashable {
   /// Forge-reported merge block outside the shared vocabulary (detail tier
   /// only); rendered verbatim. Never set by the GitHub adapter.
   let forgeBlockedReason: String?
+  /// Summary-tier review verdict, used when `reviewDecision` is nil. Display only.
+  var fallbackReviewDecision: PullRequestReviewDecision?
   /// How the originating forge writes this proposal's number ("#12" / "!12"),
   /// stamped by the adapter so badges render it without a registry lookup.
   let numberSigil: String
@@ -50,6 +52,7 @@ nonisolated struct ForgePullRequest: Equatable, Hashable {
     statusCheckRollup: ForgePullRequestStatusCheckRollup?,
     mergeQueueEntry: ForgeMergeQueueEntry?,
     forgeBlockedReason: String? = nil,
+    fallbackReviewDecision: PullRequestReviewDecision? = nil,
     numberSigil: String = "#"
   ) {
     self.number = number
@@ -72,6 +75,7 @@ nonisolated struct ForgePullRequest: Equatable, Hashable {
     self.statusCheckRollup = statusCheckRollup
     self.mergeQueueEntry = mergeQueueEntry
     self.forgeBlockedReason = forgeBlockedReason
+    self.fallbackReviewDecision = fallbackReviewDecision
     self.numberSigil = numberSigil
   }
 }

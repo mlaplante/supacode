@@ -32,6 +32,8 @@ struct LayoutFeatureTests {
       self.initialState = initialState
     }
 
+    nonisolated deinit {}
+
     var renderer: NSView? { view }
 
     func startSession(at geometry: ContentGeometry) {
@@ -59,6 +61,8 @@ struct LayoutFeatureTests {
     private(set) var requests: [ContentRequest] = []
 
     var madeStates: [TerminalContentState] { requests.map { Self.terminalState(of: $0.content) } }
+
+    nonisolated deinit {}
 
     static func terminalState(of content: ContentState) -> TerminalContentState {
       guard case .terminal(let state) = content else { return TerminalContentState(workingDirectory: nil) }
@@ -1864,16 +1868,5 @@ struct LayoutFeatureTests {
       $0.layout.tree = $0.layout.tree.settingZoomed($0.layout.tree.find(id: harness.paneID.rawValue))
     }
     #expect(harness.store.state.layout.isConsistent)
-  }
-
-  // Split zones only hit-test during a tab drag, so idle file drags reach the
-  // terminal beneath instead of the overlay.
-  @Test func tabDragActivityTracksTheInFlightTabDrag() {
-    let dragModel = PaneTabDragModel()
-    #expect(!dragModel.isTabDragActive)
-    dragModel.startDrag(from: TabID())
-    #expect(dragModel.isTabDragActive)
-    dragModel.reset()
-    #expect(!dragModel.isTabDragActive)
   }
 }

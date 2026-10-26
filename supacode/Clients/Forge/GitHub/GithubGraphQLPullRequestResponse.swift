@@ -123,6 +123,7 @@ nonisolated struct GithubGraphQLPullRequestResponse: Decodable {
     let statusCheckRollup: ForgePullRequestStatusCheckRollup?
     let mergeQueueEntry: ForgeMergeQueueEntry?
     let headRepository: HeadRepository?
+    let latestOpinionatedReviews: ReviewConnection?
 
     var pullRequest: ForgePullRequest {
       ForgePullRequest(
@@ -144,7 +145,10 @@ nonisolated struct GithubGraphQLPullRequestResponse: Decodable {
         commitsCount: commits?.totalCount,
         authorLogin: author?.login,
         statusCheckRollup: statusCheckRollup,
-        mergeQueueEntry: mergeQueueEntry
+        mergeQueueEntry: mergeQueueEntry,
+        fallbackReviewDecision: PullRequestReviewDecision(
+          latestReviewStates: latestOpinionatedReviews?.states ?? []
+        )
       )
     }
 
@@ -163,6 +167,24 @@ nonisolated struct GithubGraphQLPullRequestResponse: Decodable {
 
   nonisolated struct CommitConnection: Decodable {
     let totalCount: Int
+  }
+
+  /// Lenient on purpose: null nodes in this display-only field must never fail the PR decode.
+  nonisolated struct ReviewConnection: Decodable {
+    let nodes: [Review?]?
+
+    var states: [String] {
+      var states: [String] = []
+      for node in nodes ?? [] {
+        guard let state = node?.state else { continue }
+        states.append(state)
+      }
+      return states
+    }
+  }
+
+  nonisolated struct Review: Decodable {
+    let state: String?
   }
 
   nonisolated struct PullRequestAuthor: Decodable {

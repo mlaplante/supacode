@@ -1,3 +1,5 @@
+import Foundation
+
 public nonisolated enum AutoDeletePeriod: Int, Codable, CaseIterable, Comparable, Sendable {
   #if DEBUG
     case immediately = 0
@@ -139,6 +141,8 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
   public var copyUntrackedOnWorktreeCreate: Bool
   public var pullRequestMergeStrategy: PullRequestMergeStrategy
   public var terminalThemeSyncEnabled: Bool
+  /// Whether the Supacode theme renders a translucent, blurred background; nil follows the OS default.
+  public var terminalBackgroundTransparencyEnabled: Bool?
   /// Whether the optional `~/.supacode/ghostty.config` merges after the standard
   /// Ghostty config or replaces it. Inert until that file exists.
   public var ghosttyUserConfigMode: GhosttyUserConfigMode
@@ -258,6 +262,7 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     copyUntrackedOnWorktreeCreate: Bool = false,
     pullRequestMergeStrategy: PullRequestMergeStrategy = .merge,
     terminalThemeSyncEnabled: Bool = true,
+    terminalBackgroundTransparencyEnabled: Bool? = nil,
     ghosttyUserConfigMode: GhosttyUserConfigMode = .mergeAfterDefault,
     automatedActionPolicy: AutomatedActionPolicy = .cliOnly,
     defaultWorktreeBaseDirectoryPath: String? = nil,
@@ -306,6 +311,7 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     self.copyUntrackedOnWorktreeCreate = copyUntrackedOnWorktreeCreate
     self.pullRequestMergeStrategy = pullRequestMergeStrategy
     self.terminalThemeSyncEnabled = terminalThemeSyncEnabled
+    self.terminalBackgroundTransparencyEnabled = terminalBackgroundTransparencyEnabled
     self.ghosttyUserConfigMode = ghosttyUserConfigMode
     self.automatedActionPolicy = automatedActionPolicy
     self.defaultWorktreeBaseDirectoryPath = defaultWorktreeBaseDirectoryPath
@@ -446,6 +452,8 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
     terminalThemeSyncEnabled =
       try container.decodeIfPresent(Bool.self, forKey: .terminalThemeSyncEnabled)
       ?? false
+    terminalBackgroundTransparencyEnabled =
+      try container.decodeIfPresent(Bool.self, forKey: .terminalBackgroundTransparencyEnabled)
     // Reject unrecognized values (and a mistyped key) rather than throwing, which
     // would reset the whole file to defaults. Pre-feature files omit this key.
     ghosttyUserConfigMode =
@@ -565,7 +573,7 @@ public nonisolated struct GlobalSettings: Codable, Equatable, Sendable {
   }
 }
 
-extension GlobalSettings {
+nonisolated extension GlobalSettings {
   /// Effective enablement for one forge integration. GitHub reads the legacy
   /// stored flag so downgraded builds keep their setting.
   public func forgeIntegrationEnabled(forID id: String) -> Bool {
@@ -579,5 +587,21 @@ extension GlobalSettings {
       return
     }
     forgeEnabledByID[id] = enabled
+  }
+}
+
+nonisolated extension GlobalSettings {
+  /// Translucency stays on through macOS 26 and defaults off from macOS 27.
+  public static func defaultTerminalBackgroundTransparency(osMajorVersion: Int) -> Bool {
+    osMajorVersion < 27
+  }
+
+  public static var defaultTerminalBackgroundTransparency: Bool {
+    defaultTerminalBackgroundTransparency(
+      osMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
+  }
+
+  public var resolvedTerminalBackgroundTransparency: Bool {
+    terminalBackgroundTransparencyEnabled ?? Self.defaultTerminalBackgroundTransparency
   }
 }

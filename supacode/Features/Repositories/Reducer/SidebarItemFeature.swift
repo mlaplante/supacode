@@ -119,7 +119,7 @@ struct SidebarItemFeature {
 
     var runningScripts: IdentifiedArrayOf<RunningScript> = []
 
-    struct RunningScript: Equatable, Identifiable, Sendable {
+    nonisolated struct RunningScript: Equatable, Identifiable, Sendable {
       /// Matches `ScriptDefinition.id`.
       let id: UUID
       var tint: RepositoryColor
@@ -377,7 +377,7 @@ extension SidebarItemFeature.State.Lifecycle {
 /// Per-row terminal snapshot; the manager emits it Equatable-diffed, so
 /// identical snapshots never reach TCA. `isProgressBusy` reflects Ghostty
 /// progress state only; the parent overlays agent activity downstream.
-struct WorktreeRowProjection: Equatable, Sendable {
+nonisolated struct WorktreeRowProjection: Equatable, Sendable {
   let surfaceIDs: [UUID]
   let isProgressBusy: Bool
   let hasUnseenNotifications: Bool
@@ -395,7 +395,7 @@ struct WorktreeRowProjection: Equatable, Sendable {
 
 /// A surface with outstanding unread notifications. `count` counts unread
 /// arrivals not yet read/dismissed, including any the cap trimmed from the log.
-struct WorktreeUnseenSurface: Equatable, Sendable, Identifiable {
+nonisolated struct WorktreeUnseenSurface: Equatable, Sendable, Identifiable {
   let id: UUID
   let count: Int
 }
