@@ -1042,12 +1042,7 @@ struct AgentPresenceFeatureTests {
     /// sync harness does it inline so assertions run against the post-apply state.
     @MainActor mutating func restoreFromLayouts(_ layouts: [TerminalLayoutSnapshot]) {
       let staged = AgentPresenceFeature.stageRestore(fromLayouts: layouts)
-      let checked = staged.compactMapValues { stage -> AgentPresenceFeature.RestoredRecord? in
-        let alive = stage.pids.filter { AgentPresenceFeature.isAlive($0) }
-        guard !alive.isEmpty else { return nil }
-        return AgentPresenceFeature.RestoredRecord(
-          alivePids: alive, activity: stage.activity, activitySince: stage.activitySince ?? now)
-      }
+      let checked = AgentPresenceFeature.checkRestore(staged: staged, liveSessions: [], now: now)
       guard !checked.isEmpty else { return }
       send(.restoreFromSnapshotChecked(records: checked))
     }

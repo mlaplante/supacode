@@ -96,7 +96,10 @@ nonisolated struct TerminalLayoutSnapshot: Codable, Equatable, Sendable {
     let pids: [Int32]
     let activity: String
     /// Added 2026-10. Optional so snapshots written before it still decode.
-    let activitySince: Date?
+    var activitySince: Date?
+    /// `program_status` for an OSC 7501 record; absent for a hook record, and
+    /// in files written before OSC 7501.
+    var source: String?
   }
 
 }
