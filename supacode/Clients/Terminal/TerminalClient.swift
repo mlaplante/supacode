@@ -16,6 +16,7 @@ nonisolated struct TerminalClient: Sendable {
   /// Whether a CLI / deeplink pane token (a pane, tab, or content id) resolves
   /// to a pane in the worktree.
   var paneExists: @MainActor @Sendable (Worktree.ID, UUID) -> Bool
+  var paneIsWindowed: @MainActor @Sendable (Worktree.ID, UUID) -> Bool
   /// Whether a tab can move into a new split: its pane holds more than one tab
   /// and is not windowed. A single-tab or windowed pane refuses the move.
   var canMoveTabToNewSplit: @MainActor @Sendable (Worktree.ID, UUID) -> Bool
@@ -76,6 +77,8 @@ nonisolated struct TerminalClient: Sendable {
     case focusSplit(Worktree, direction: TerminalSplitMenuDirection)
     case toggleSplitZoom(Worktree)
     case equalizeSplits(Worktree)
+    case resizePane(
+      Worktree, paneToken: UUID? = nil, direction: TerminalSplitMenuDirection, amount: UInt16? = nil)
     /// Pane-addressed layout ops from the CLI / deeplinks. `paneToken` is a pane
     /// id, or the id of a tab / content the pane hosts.
     case splitPane(
@@ -98,6 +101,7 @@ nonisolated struct TerminalClient: Sendable {
     /// Cycles to the next or previous tab in the focused pane, wrapping at the ends.
     case selectRelativeTab(Worktree, forward: Bool)
     case focusSurface(Worktree, tabID: TabID, surfaceID: UUID, input: String? = nil)
+    case sendInput(Worktree, tabID: TabID, input: String, focusing: Bool = true, requestID: Int)
     case splitSurface(
       Worktree, tabID: TabID, surfaceID: UUID, direction: SplitDirection,
       input: String?, id: UUID? = nil, focusing: Bool = true)
@@ -117,6 +121,24 @@ nonisolated struct TerminalClient: Sendable {
     /// Fans a hibernation Beta-flag flip into every worktree state: enabling
     /// re-arms grace timers for hidden tabs, disabling cancels pending ones.
     case setTerminalHibernationEnabled(Bool)
+  }
+
+  enum InputDelivery: Equatable {
+    case delivered
+    /// The terminal was hibernated. It is waking, and typing before its session
+    /// restores would bypass the program's paste framing, so nothing was typed.
+    case waking
+    case readOnly
+    case noTerminal
+
+    var failureMessage: String? {
+      switch self {
+      case .delivered: nil
+      case .waking: "The tab was hibernated and is waking up. Send again in a moment."
+      case .readOnly: "The tab's terminal is read-only."
+      case .noTerminal: "The tab has no terminal to type into."
+      }
+    }
   }
 
   enum Event: Equatable {
@@ -142,6 +164,7 @@ nonisolated struct TerminalClient: Sendable {
     /// A rename command settled. `applied` is false when the tab vanished or its
     /// title was locked, so the CLI ack reports the failure instead of ok.
     case tabRenamed(worktreeID: Worktree.ID, tabID: TabID, applied: Bool)
+    case tabInputSent(requestID: Int, delivery: InputDelivery)
     /// The worktree's terminal state was torn down (prune path).
     case worktreeStateTornDown(worktreeID: Worktree.ID)
     /// Forwarded from the terminal manager when surfaces close (single or bulk).
@@ -182,6 +205,7 @@ nonisolated extension TerminalClient: DependencyKey {
     surfaceExistsInWorktree: { _, _ in fatalError("TerminalClient.surfaceExistsInWorktree not configured") },
     idExistsAnywhere: { _ in fatalError("TerminalClient.idExistsAnywhere not configured") },
     paneExists: { _, _ in fatalError("TerminalClient.paneExists not configured") },
+    paneIsWindowed: { _, _ in fatalError("TerminalClient.paneIsWindowed not configured") },
     canMoveTabToNewSplit: { _, _ in fatalError("TerminalClient.canMoveTabToNewSplit not configured") },
     tabID: { _, _ in fatalError("TerminalClient.tabID not configured") },
     selectedTabID: { _ in fatalError("TerminalClient.selectedTabID not configured") },
@@ -206,6 +230,7 @@ nonisolated extension TerminalClient: DependencyKey {
     // tests that don't exercise cross-worktree collisions need not override it.
     idExistsAnywhere: { _ in false },
     paneExists: unimplemented("TerminalClient.paneExists", placeholder: true),
+    paneIsWindowed: unimplemented("TerminalClient.paneIsWindowed", placeholder: false),
     canMoveTabToNewSplit: unimplemented("TerminalClient.canMoveTabToNewSplit", placeholder: true),
     tabID: unimplemented("TerminalClient.tabID", placeholder: nil),
     selectedTabID: unimplemented("TerminalClient.selectedTabID", placeholder: nil),

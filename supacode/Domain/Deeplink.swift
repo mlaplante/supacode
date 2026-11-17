@@ -41,6 +41,7 @@ enum Deeplink: Equatable, Sendable {
     case tab(tabID: UUID)
     case tabNew(input: String?, id: UUID?, title: String? = nil, pane: UUID? = nil)
     case tabRename(tabID: UUID, title: String)
+    case tabSend(tabID: UUID, input: String)
     case tabDestroy(tabID: UUID)
     /// Moves a tab into a fresh split neighboring its current pane.
     case tabMove(tabID: UUID, direction: TerminalSplitMenuDirection)
@@ -56,6 +57,7 @@ enum Deeplink: Equatable, Sendable {
     /// Toggle window mode for the pane addressed by `token`.
     case paneWindow(token: UUID)
     case paneEqualize
+    case paneResize(token: UUID, direction: TerminalSplitMenuDirection, amount: UInt16?)
     case surface(tabID: UUID, surfaceID: UUID, input: String?)
     case surfaceSplit(tabID: UUID, surfaceID: UUID, direction: SplitDirection, input: String?, id: UUID?)
     case surfaceDestroy(tabID: UUID, surfaceID: UUID)

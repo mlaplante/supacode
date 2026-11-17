@@ -10,7 +10,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
   case toggleLeftSidebar, revealInSidebar
   case expandAllSidebarGroups, collapseAllSidebarGroups
   case newWorktree, refreshWorktrees, archivedWorktrees, archiveWorktree
-  case deleteWorktree, confirmWorktreeAction
+  case deleteWorktree, confirmWorktreeAction, customizeAppearance
   case selectNextWorktree, selectPreviousWorktree
   case worktreeHistoryBack, worktreeHistoryForward
   case selectWorktree(Int)
@@ -21,6 +21,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
   case newTerminalTab, closeTab
   case splitRight, splitLeft, splitDown, splitUp
   case focusSplitLeft, focusSplitRight, focusSplitUp, focusSplitDown
+  case resizePaneLeft, resizePaneRight, resizePaneUp, resizePaneDown
   case toggleSplitZoom, equalizeSplits
   case jumpToLatestUnread, jumpToNextAwaiting
   case togglePullRequestInspector, toggleFilesInspector, toggleNotificationsInspector
@@ -33,13 +34,14 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
       false
     case .commandPalette, .worktreeSwitcher, .openSettings, .checkForUpdates, .showMainWindow,
       .toggleLeftSidebar, .revealInSidebar, .expandAllSidebarGroups, .collapseAllSidebarGroups,
-      .newWorktree, .refreshWorktrees, .archivedWorktrees, .confirmWorktreeAction,
+      .newWorktree, .refreshWorktrees, .archivedWorktrees, .confirmWorktreeAction, .customizeAppearance,
       .selectNextWorktree, .selectPreviousWorktree, .worktreeHistoryBack, .worktreeHistoryForward,
       .selectWorktree, .selectTab, .selectNextTab, .selectPreviousTab,
       .openWorktree, .revealInFinder, .openRepository, .addRemoteRepository, .cloneRepository,
       .openPullRequest, .copyPath, .runScript, .stopRunScript, .renameTab, .toggleWindowMode,
       .newTerminalTab, .closeTab, .splitRight, .splitLeft, .splitDown, .splitUp,
       .focusSplitLeft, .focusSplitRight, .focusSplitUp, .focusSplitDown,
+      .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown,
       .toggleSplitZoom, .equalizeSplits, .jumpToLatestUnread, .jumpToNextAwaiting,
       .togglePullRequestInspector, .toggleFilesInspector, .toggleNotificationsInspector,
       .startSearch, .findNext, .findPrevious, .useSelectionForFind:
@@ -81,6 +83,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
     case .archiveWorktree: "archiveWorktree"
     case .deleteWorktree: "deleteWorktree"
     case .confirmWorktreeAction: "confirmWorktreeAction"
+    case .customizeAppearance: "customizeAppearance"
     case .selectNextWorktree: "selectNextWorktree"
     case .selectPreviousWorktree: "selectPreviousWorktree"
     case .worktreeHistoryBack: "worktreeHistoryBack"
@@ -110,6 +113,10 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
     case .focusSplitRight: "focusSplitRight"
     case .focusSplitUp: "focusSplitUp"
     case .focusSplitDown: "focusSplitDown"
+    case .resizePaneLeft: "resizePaneLeft"
+    case .resizePaneRight: "resizePaneRight"
+    case .resizePaneUp: "resizePaneUp"
+    case .resizePaneDown: "resizePaneDown"
     case .toggleSplitZoom: "toggleSplitZoom"
     case .equalizeSplits: "equalizeSplits"
     case .jumpToLatestUnread: "jumpToLatestUnread"
@@ -140,6 +147,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
     "archiveWorktree": .archiveWorktree,
     "deleteWorktree": .deleteWorktree,
     "confirmWorktreeAction": .confirmWorktreeAction,
+    "customizeAppearance": .customizeAppearance,
     "selectNextWorktree": .selectNextWorktree,
     "selectPreviousWorktree": .selectPreviousWorktree,
     "worktreeHistoryBack": .worktreeHistoryBack,
@@ -166,6 +174,10 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
     "focusSplitRight": .focusSplitRight,
     "focusSplitUp": .focusSplitUp,
     "focusSplitDown": .focusSplitDown,
+    "resizePaneLeft": .resizePaneLeft,
+    "resizePaneRight": .resizePaneRight,
+    "resizePaneUp": .resizePaneUp,
+    "resizePaneDown": .resizePaneDown,
     "toggleSplitZoom": .toggleSplitZoom,
     "equalizeSplits": .equalizeSplits,
     "selectNextTab": .selectNextTab,
@@ -216,6 +228,7 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
     case .archiveWorktree: "Archive Worktree"
     case .deleteWorktree: "Delete Worktree"
     case .confirmWorktreeAction: "Confirm Worktree Action"
+    case .customizeAppearance: "Customize Appearance"
     case .selectNextWorktree: "Select Next Worktree"
     case .selectPreviousWorktree: "Select Previous Worktree"
     case .worktreeHistoryBack: "Back in Worktree History"
@@ -245,6 +258,10 @@ public nonisolated enum AppShortcutID: Codable, Hashable, Sendable, CodingKeyRep
     case .focusSplitRight: "Focus Split Right"
     case .focusSplitUp: "Focus Split Up"
     case .focusSplitDown: "Focus Split Down"
+    case .resizePaneLeft: "Resize Pane Left"
+    case .resizePaneRight: "Resize Pane Right"
+    case .resizePaneUp: "Resize Pane Up"
+    case .resizePaneDown: "Resize Pane Down"
     case .toggleSplitZoom: "Toggle Split Zoom"
     case .equalizeSplits: "Equalize Splits"
     case .jumpToLatestUnread: "Jump to Latest Unread"
@@ -519,6 +536,9 @@ public enum AppShortcuts {
     id: .confirmWorktreeAction,
     keyEquivalent: .return, ghosttyKeyName: "enter", modifiers: .command
   )
+  public static let customizeAppearance = AppShortcut(
+    id: .customizeAppearance, key: "r", modifiers: [.command, .control], isEnabledByDefault: false
+  )
   public static let selectNextWorktree = AppShortcut(
     id: .selectNextWorktree,
     keyEquivalent: .downArrow, ghosttyKeyName: "arrow_down", modifiers: [.command, .control]
@@ -608,6 +628,22 @@ public enum AppShortcuts {
     id: .focusSplitDown,
     keyEquivalent: .downArrow, ghosttyKeyName: "arrow_down", modifiers: [.command, .option]
   )
+  public static let resizePaneLeft = AppShortcut(
+    id: .resizePaneLeft,
+    keyEquivalent: .leftArrow, ghosttyKeyName: "arrow_left", modifiers: [.command, .option, .shift]
+  )
+  public static let resizePaneRight = AppShortcut(
+    id: .resizePaneRight,
+    keyEquivalent: .rightArrow, ghosttyKeyName: "arrow_right", modifiers: [.command, .option, .shift]
+  )
+  public static let resizePaneUp = AppShortcut(
+    id: .resizePaneUp,
+    keyEquivalent: .upArrow, ghosttyKeyName: "arrow_up", modifiers: [.command, .option, .shift]
+  )
+  public static let resizePaneDown = AppShortcut(
+    id: .resizePaneDown,
+    keyEquivalent: .downArrow, ghosttyKeyName: "arrow_down", modifiers: [.command, .option, .shift]
+  )
   public static let toggleSplitZoom = AppShortcut(
     id: .toggleSplitZoom,
     keyEquivalent: .return, ghosttyKeyName: "enter", modifiers: [.command, .shift]
@@ -688,7 +724,8 @@ public enum AppShortcuts {
       category: .worktrees,
       shortcuts: [
         newWorktree, refreshWorktrees, archivedWorktrees, archiveWorktree,
-        deleteWorktree, confirmWorktreeAction, selectNextWorktree, selectPreviousWorktree,
+        deleteWorktree, confirmWorktreeAction, customizeAppearance,
+        selectNextWorktree, selectPreviousWorktree,
         worktreeHistoryBack, worktreeHistoryForward,
       ]
     ),
@@ -698,6 +735,7 @@ public enum AppShortcuts {
       shortcuts: [
         splitRight, splitLeft, splitDown, splitUp,
         focusSplitLeft, focusSplitRight, focusSplitUp, focusSplitDown,
+        resizePaneLeft, resizePaneRight, resizePaneUp, resizePaneDown,
         toggleSplitZoom, equalizeSplits, toggleWindowMode,
       ]
     ),

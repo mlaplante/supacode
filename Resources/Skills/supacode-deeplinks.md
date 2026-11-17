@@ -66,6 +66,7 @@ supacode://worktree/<worktree_id>/appearance?title=<title>&color=<value>
 supacode://worktree/<worktree_id>/tab/<tab_id>                     # Focus a tab.
 supacode://worktree/<worktree_id>/tab/new?input=<cmd>&id=<uuid>&title=<title>&pane=<pane_token>   # Create a tab; pane= anchors it in a pane (a pane, tab, or content id).
 supacode://worktree/<worktree_id>/tab/<tab_id>/rename?title=<title>             # Set the title override; empty clears.
+supacode://worktree/<worktree_id>/tab/<tab_id>/send?input=<text>                # Type text into the tab's terminal and press Return.
 supacode://worktree/<worktree_id>/tab/<tab_id>/move?direction=left|right|up|down   # Move a tab into a new split.
 supacode://worktree/<worktree_id>/tab/<tab_id>/destroy                          # Close a tab.
 ```
@@ -81,6 +82,7 @@ supacode://worktree/<worktree_id>/pane/focus?direction=left|right|up|down   # Fo
 supacode://worktree/<worktree_id>/pane/<token>/split?direction=horizontal|vertical&input=<cmd>&id=<uuid>   # Split a pane.
 supacode://worktree/<worktree_id>/pane/<token>/destroy            # Close a pane and all its tabs.
 supacode://worktree/<worktree_id>/pane/<token>/zoom               # Toggle a pane's zoom.
+supacode://worktree/<worktree_id>/pane/<token>/resize?direction=left|right|up|down&amount=<points>   # Move a pane's divider toward a direction; amount defaults to one shortcut step.
 supacode://worktree/<worktree_id>/pane/<token>/window             # Toggle a pane's window mode.
 supacode://worktree/<worktree_id>/pane/equalize                   # Equalize every split ratio.
 ```
@@ -91,7 +93,7 @@ A surface is now a tab's content. These routes are deprecated and **will be
 removed in the next release**; prefer `pane split` and the `tab` routes.
 
 ```
-supacode://worktree/<worktree_id>/tab/<tab_id>/surface/<surface_id>?input=<cmd> # Deprecated: use the tab focus route.
+supacode://worktree/<worktree_id>/tab/<tab_id>/surface/<surface_id>?input=<cmd> # Deprecated: use the tab focus route, or the tab send route for input.
 supacode://worktree/<worktree_id>/tab/<tab_id>/surface/<surface_id>/split?direction=horizontal|vertical&input=<cmd>&id=<uuid>   # Deprecated: use pane split.
 supacode://worktree/<worktree_id>/tab/<tab_id>/surface/<surface_id>/destroy     # Deprecated: use the tab destroy route.
 ```

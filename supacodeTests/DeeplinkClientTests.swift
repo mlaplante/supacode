@@ -415,6 +415,38 @@ struct DeeplinkClientTests {
     #expect(parse(URL(string: "\(base)/window")!) == .worktree(id: id, action: .paneWindow(token: paneUUID)))
   }
 
+  @Test func worktreePaneResizeCarriesDirectionAndAmount() {
+    let url = URL(
+      string: "supacode://worktree/\(encoded)/pane/\(paneUUID.uuidString)/resize?direction=right&amount=120")!
+    #expect(
+      parse(url)
+        == .worktree(
+          id: "/tmp/repo/wt-1",
+          action: .paneResize(token: paneUUID, direction: .right, amount: 120)
+        )
+    )
+  }
+
+  @Test func worktreePaneResizeWithoutAmountLeavesTheStepToTheApp() {
+    let url = URL(string: "supacode://worktree/\(encoded)/pane/\(paneUUID.uuidString)/resize?direction=u")!
+    #expect(
+      parse(url)
+        == .worktree(
+          id: "/tmp/repo/wt-1",
+          action: .paneResize(token: paneUUID, direction: .up, amount: nil)
+        )
+    )
+  }
+
+  @Test(arguments: [
+    "direction=sideways", "amount=120", "direction=left&amount=0", "direction=left&amount=-5",
+    "direction=left&amount=abc", "direction=left&amount=70000",
+  ])
+  func worktreePaneResizeInvalidQueryReturnsNil(_ query: String) {
+    let url = URL(string: "supacode://worktree/\(encoded)/pane/\(paneUUID.uuidString)/resize?\(query)")!
+    #expect(parse(url) == nil)
+  }
+
   @Test func worktreePaneEqualize() {
     let url = URL(string: "supacode://worktree/\(encoded)/pane/equalize")!
     #expect(parse(url) == .worktree(id: "/tmp/repo/wt-1", action: .paneEqualize))
@@ -440,6 +472,30 @@ struct DeeplinkClientTests {
     let tabUUID = UUID(uuidString: "550E8400-E29B-41D4-A716-446655440000")!
     let url = URL(string: "supacode://worktree/\(encoded)/tab/\(tabUUID.uuidString)/move?direction=sideways")!
     #expect(parse(url) == nil)
+  }
+
+  @Test func worktreeTabSend() {
+    let tabUUID = UUID(uuidString: "550E8400-E29B-41D4-A716-446655440000")!
+    let url = URL(string: "supacode://worktree/\(encoded)/tab/\(tabUUID.uuidString)/send?input=run%20the%20tests")!
+    #expect(
+      parse(url) == .worktree(id: "/tmp/repo/wt-1", action: .tabSend(tabID: tabUUID, input: "run the tests")))
+  }
+
+  @Test func worktreeTabSendInBackground() {
+    let tabUUID = UUID(uuidString: "550E8400-E29B-41D4-A716-446655440000")!
+    let url = URL(
+      string: "supacode://worktree/\(encoded)/tab/\(tabUUID.uuidString)/send?input=ls&background=true")!
+    #expect(
+      parse(url)
+        == .worktree(id: "/tmp/repo/wt-1", action: .tabSend(tabID: tabUUID, input: "ls"), background: true))
+  }
+
+  @Test func worktreeTabSendWithoutInputReturnsNil() {
+    let tabUUID = UUID(uuidString: "550E8400-E29B-41D4-A716-446655440000")!
+    for query in ["", "?input="] {
+      let url = URL(string: "supacode://worktree/\(encoded)/tab/\(tabUUID.uuidString)/send\(query)")!
+      #expect(parse(url) == nil)
+    }
   }
 
   // MARK: - Repo actions.

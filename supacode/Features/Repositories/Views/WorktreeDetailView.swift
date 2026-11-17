@@ -398,6 +398,9 @@ struct WorktreeDetailView: View {
       .focusedAction(\.focusSplitAction, enabled: hasActiveWorktree) { direction in
         store.send(.focusSplit(direction))
       }
+      .focusedAction(\.resizePaneAction, enabled: hasActiveWorktree) { direction in
+        store.send(.resizePane(direction))
+      }
       .focusedAction(\.closeTabAction, enabled: hasActiveWorktree && hasFocusedTab) {
         store.send(.closeTab)
       }

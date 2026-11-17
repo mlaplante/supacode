@@ -273,6 +273,7 @@ struct AppFeature {
     case tabRemoved(worktreeID: Worktree.ID, tabID: TabID)
     /// tab rename: resolves when the manager reports whether the title applied.
     case tabRenamed(worktreeID: Worktree.ID, tabID: TabID)
+    case tabInputSent(requestID: Int)
     /// surface close (scoped by worktree so a duplicate id elsewhere can't cross-resolve).
     case surfaceClosed(worktreeID: Worktree.ID, surfaceID: UUID)
     /// worktree delete (git worktree removed).
@@ -325,6 +326,7 @@ struct AppFeature {
     case toggleSplitZoom
     case equalizeSplits
     case focusSplit(TerminalSplitMenuDirection)
+    case resizePane(TerminalSplitMenuDirection)
     case selectTerminalTabAtIndex(Int)
     case selectNextTerminalTab
     case selectPreviousTerminalTab
@@ -1170,6 +1172,16 @@ struct AppFeature {
           await terminalClient.send(.focusSplit(worktree, direction: direction))
         }
 
+      case .resizePane(let direction):
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
+          !worktree.isMissing
+        else {
+          return .none
+        }
+        return .run { _ in
+          await terminalClient.send(.resizePane(worktree, direction: direction))
+        }
+
       case .jumpToLatestUnread:
         guard let location = terminalClient.latestUnreadNotification() else {
           jumpLogger.debug("jumpToLatestUnread invoked with no unread notifications.")
@@ -1813,6 +1825,14 @@ struct AppFeature {
           return .send(.focusSplit(.down))
         case .focusSplitUp:
           return .send(.focusSplit(.up))
+        case .resizePaneRight:
+          return .send(.resizePane(.right))
+        case .resizePaneLeft:
+          return .send(.resizePane(.left))
+        case .resizePaneDown:
+          return .send(.resizePane(.down))
+        case .resizePaneUp:
+          return .send(.resizePane(.up))
         case .toggleSplitZoom:
           return .send(.toggleSplitZoom)
         case .equalizeSplits:
@@ -2127,6 +2147,11 @@ struct AppFeature {
           guard case .tabRenamed(let ackWorktree, let renamed) = match else { return false }
           return ackWorktree == worktreeID && renamed == tabID
         }
+
+      case .terminalEvent(.tabInputSent(let requestID, let delivery)):
+        return resolveCommandAcks(
+          ok: delivery == .delivered, error: delivery.failureMessage, state: &state
+        ) { $0 == .tabInputSent(requestID: requestID) }
 
       case .terminalEvent(.worktreeStateTornDown):
         // The manager already detached the layout; nothing app-level remains.
@@ -2716,13 +2741,14 @@ struct AppFeature {
     // user can actually clear the orphan.
     let spawnsShell: Bool
     switch action {
-    case .run, .runScript, .tabNew, .surfaceSplit, .paneSplit:
+    case .run, .runScript, .tabNew, .tabSend, .surfaceSplit, .paneSplit:
       spawnsShell = true
     case .surface(_, _, let input):
       spawnsShell = input?.isEmpty == false
     case .select, .stop, .stopScript, .tab, .tabRename, .tabDestroy, .surfaceDestroy,
       .archive, .unarchive, .delete, .pin, .unpin, .appearance,
-      .tabMove, .paneFocus, .paneFocusDirection, .paneDestroy, .paneZoom, .paneWindow, .paneEqualize:
+      .tabMove, .paneFocus, .paneFocusDirection, .paneDestroy, .paneZoom, .paneWindow, .paneEqualize,
+      .paneResize:
       spawnsShell = false
     }
     if spawnsShell, let worktree = state.repositories.worktree(for: worktreeID), worktree.isMissing {
@@ -2973,6 +2999,22 @@ struct AppFeature {
       return awaitingCompletion(
         effect, match: .tabRenamed(worktreeID: worktreeID, tabID: TabID(rawValue: tabID)),
         responseFD: responseFD, timeoutSeconds: timeoutSeconds, state: &state)
+    case .tabSend(let tabID, let input):
+      guard validateTab(worktreeID: worktreeID, tabID: tabID, state: &state) else { return .none }
+      if requiresInputConfirmation(state: state, bypassConfirmation: bypassConfirmation) {
+        return presentDeeplinkConfirmation(
+          worktreeID: worktreeID, responseFD: responseFD, timeoutSeconds: timeoutSeconds,
+          message: .command(input), action: action, state: &state, background: background)
+      }
+      state.commandAckGeneration += 1
+      let requestID = state.commandAckGeneration
+      let effect = sendTerminalCommand(worktreeID: worktreeID, state: &state) { worktree in
+        .sendInput(
+          worktree, tabID: TabID(rawValue: tabID), input: input, focusing: !background, requestID: requestID)
+      }
+      return awaitingCompletion(
+        effect, match: .tabInputSent(requestID: requestID),
+        responseFD: responseFD, timeoutSeconds: timeoutSeconds, state: &state)
     case .tabDestroy(let tabID):
       guard validateTab(worktreeID: worktreeID, tabID: tabID, state: &state) else { return .none }
       guard bypassConfirmation else {
@@ -3154,6 +3196,22 @@ struct AppFeature {
       return sendTerminalCommand(worktreeID: worktreeID, state: &state) { worktree in
         .equalizeSplits(worktree)
       }
+    case .paneResize(let token, let direction, let amount):
+      guard validatePane(worktreeID: worktreeID, token: token, state: &state) else { return .none }
+      guard !terminalClient.paneIsWindowed(worktreeID, token) else {
+        deeplinkLogger.warning("Pane \(token) is in window mode and cannot be resized in worktree \(worktreeID)")
+        state.alert = AlertState {
+          TextState("Pane cannot be resized")
+        } actions: {
+          ButtonState(role: .cancel, action: .dismiss) { TextState("OK") }
+        } message: {
+          TextState("It is in window mode, so it has no divider to move.")
+        }
+        return .none
+      }
+      return sendTerminalCommand(worktreeID: worktreeID, state: &state) { worktree in
+        .resizePane(worktree, paneToken: token, direction: direction, amount: amount)
+      }
     }
   }
 
@@ -3174,7 +3232,7 @@ struct AppFeature {
     guard let definition = resolveScript(scriptID: scriptID, in: worktree) else {
       state.alert = scriptAlert(
         title: "Script not found",
-        message: "No script matching the deeplink could be found. It may have been removed."
+        message: "The script could not be found. It may have been removed."
       )
       return .none
     }
@@ -3230,7 +3288,7 @@ struct AppFeature {
     guard let definition = resolveScript(scriptID: scriptID, in: worktree) else {
       state.alert = scriptAlert(
         title: "Script not found",
-        message: "No script matching the deeplink could be found. It may have been removed."
+        message: "The script could not be found. It may have been removed."
       )
       return .none
     }
@@ -3320,7 +3378,7 @@ struct AppFeature {
         TextState("OK")
       }
     } message: {
-      TextState("No worktree matching the deeplink could be found. It may have been removed.")
+      TextState("The worktree could not be found. It may have been removed.")
     }
   }
 
@@ -3344,7 +3402,7 @@ struct AppFeature {
         TextState("OK")
       }
     } message: {
-      TextState("No repository matching the deeplink could be found.")
+      TextState("The repository could not be found.")
     }
   }
 
@@ -3934,7 +3992,7 @@ struct AppFeature {
           TextState("OK")
         }
       } message: {
-        TextState("No pane matching the deeplink could be found. It may have been closed.")
+        TextState("The pane could not be found. It may have been closed.")
       }
       return false
     }
@@ -3956,7 +4014,7 @@ struct AppFeature {
           TextState("OK")
         }
       } message: {
-        TextState("No tab matching the deeplink could be found. It may have been closed.")
+        TextState("The tab could not be found. It may have been closed.")
       }
       return false
     }
@@ -3986,7 +4044,7 @@ struct AppFeature {
           TextState("OK")
         }
       } message: {
-        TextState("No surface matching the deeplink could be found. It may have been closed.")
+        TextState("The surface could not be found. It may have been closed.")
       }
       return false
     }

@@ -58,6 +58,10 @@ nonisolated enum DeeplinkURLBuilder {
     "supacode://worktree/\(worktreeID)/tab/\(tabID)/rename?title=\(percentEncodeQueryValue(title))"
   }
 
+  static func tabSend(worktreeID: String, tabID: String, input: String) -> String {
+    "supacode://worktree/\(worktreeID)/tab/\(tabID)/send?input=\(percentEncodeQueryValue(input))"
+  }
+
   static func tabClose(worktreeID: String, tabID: String) -> String {
     "supacode://worktree/\(worktreeID)/tab/\(tabID)/destroy"
   }
@@ -133,6 +137,12 @@ nonisolated enum DeeplinkURLBuilder {
 
   static func paneZoom(worktreeID: String, paneToken: String) -> String {
     "supacode://worktree/\(worktreeID)/pane/\(paneToken)/zoom"
+  }
+
+  static func paneResize(worktreeID: String, paneToken: String, direction: String, amount: UInt16?) -> String {
+    var url = "supacode://worktree/\(worktreeID)/pane/\(paneToken)/resize?direction=\(direction)"
+    if let amount { url += "&amount=\(amount)" }
+    return url
   }
 
   static func paneWindow(worktreeID: String, paneToken: String) -> String {

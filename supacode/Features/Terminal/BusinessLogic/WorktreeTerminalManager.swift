@@ -413,8 +413,10 @@ final class WorktreeTerminalManager {
       sendLayout(worktree.id, .selectTab(id: owningTab))
       host.liveSurface(surfaceID)?.requestFocus()
       if let input, !input.isEmpty {
-        host.focusAndInsertText(input + "\r")
+        host.liveSurface(surfaceID)?.submitText(input)
       }
+    case .sendInput(let worktree, let tabID, let input, let focusing, let requestID):
+      sendInput(input, toTab: tabID, in: worktree, focusing: focusing, requestID: requestID)
     case .splitSurface(
       let worktree, let tabID, let surfaceID, let direction, let input, let id, let focusing
     ):
@@ -481,6 +483,23 @@ final class WorktreeTerminalManager {
     sendLayout(worktree.id, .selectTab(id: target.id))
   }
 
+  private func sendInput(
+    _ input: String, toTab tabID: TabID, in worktree: Worktree, focusing: Bool, requestID: Int
+  ) {
+    let host = host(for: worktree)
+    let surfaceID = host.tab(withID: tabID)?.content.id.rawValue
+    let wasDormant = surfaceID.map(host.isDormantSurface) ?? false
+    sendLayout(worktree.id, .wakeTab(id: tabID))
+    let surface = surfaceID.flatMap(host.liveSurface)
+    if focusing {
+      sendLayout(worktree.id, .selectTab(id: tabID))
+      surface?.requestFocus()
+    }
+    let delivery: TerminalClient.InputDelivery =
+      if wasDormant { .waking } else { surface?.submitText(input) ?? .noTerminal }
+    emit(.tabInputSent(requestID: requestID, delivery: delivery))
+  }
+
   /// The tab ID when it exists in the worktree's layout, else nil.
   private func presentTab(_ tabID: TabID, in worktreeID: Worktree.ID) -> TabID? {
     layoutState(for: worktreeID)?.layout.pane(containingTab: tabID) != nil ? tabID : nil
@@ -498,11 +517,11 @@ final class WorktreeTerminalManager {
       host(for: worktree).navigateSearchOnFocusedSurface(.previous)
     case .createTab, .createTabWithInput, .openFileWithScript, .ensureInitialTab, .stopRunScript, .stopScript,
       .runBlockingScript, .closeFocusedTab, .closeFocusedSurface, .performBindingAction,
-      .performBindingActionOnSurface, .selectTab, .selectTabAtIndex, .selectRelativeTab, .focusSurface, .splitSurface,
-      .destroyTab, .destroySurface, .renameTab, .setImagePasteAgents, .prune, .removeWorktreeLayout,
+      .performBindingActionOnSurface, .selectTab, .selectTabAtIndex, .selectRelativeTab, .focusSurface, .sendInput,
+      .splitSurface, .destroyTab, .destroySurface, .renameTab, .setImagePasteAgents, .prune, .removeWorktreeLayout,
       .setNotificationsEnabled, .enforceNotificationRetentionLimit, .setSelectedWorktreeID, .beginTabRename,
       .setTerminalHibernationEnabled, .toggleWindowModeForFocusedPane,
-      .splitFocusedPane, .focusSplit, .toggleSplitZoom, .equalizeSplits,
+      .splitFocusedPane, .focusSplit, .toggleSplitZoom, .equalizeSplits, .resizePane,
       .splitPane, .focusPane, .closePane, .toggleZoomPane, .toggleWindowModeForPane, .moveTabToSplit:
       return false
     }
@@ -512,17 +531,22 @@ final class WorktreeTerminalManager {
   private func handleBindingActionCommand(_ command: TerminalClient.Command) -> Bool {
     switch command {
     case .splitFocusedPane(let worktree, let direction):
-      sendFocusedContentLayoutAction(worktree.id) {
+      sendSelectedContentLayoutAction(worktree.id) {
         .contentRequestedSplit(content: $0, direction: direction.newSplitDirection)
       }
     case .focusSplit(let worktree, let direction):
-      sendFocusedContentLayoutAction(worktree.id) {
+      sendSelectedContentLayoutAction(worktree.id) {
         .contentRequestedFocusSplit(content: $0, direction: direction.focusSplitDirection)
       }
     case .toggleSplitZoom(let worktree):
-      sendFocusedContentLayoutAction(worktree.id) { .contentRequestedToggleZoom(content: $0) }
+      sendSelectedContentLayoutAction(worktree.id) { .contentRequestedToggleZoom(content: $0) }
     case .equalizeSplits(let worktree):
       sendLayout(worktree.id, .equalizePanes)
+    case .resizePane(let worktree, let paneToken, let direction, let amount):
+      sendSelectedContentLayoutAction(worktree.id, paneToken: paneToken) {
+        .contentRequestedResize(
+          content: $0, direction: direction.spatialDirection, amount: amount ?? Self.paneResizeStep)
+      }
     case .splitPane(let worktree, let token, let direction, let input, let id, let focusing):
       splitPane(in: worktree, paneToken: token, direction: direction, input: input, id: id, focusing: focusing)
     case .focusPane(let worktree, let paneToken):
@@ -544,7 +568,7 @@ final class WorktreeTerminalManager {
     case .createTab, .createTabWithInput, .openFileWithScript, .ensureInitialTab, .stopRunScript, .stopScript,
       .runBlockingScript, .closeFocusedTab, .closeFocusedSurface, .startSearch, .searchSelection,
       .navigateSearchNext, .navigateSearchPrevious, .selectTab, .selectTabAtIndex, .selectRelativeTab,
-      .focusSurface, .splitSurface, .destroyTab, .destroySurface, .renameTab, .prune, .removeWorktreeLayout,
+      .focusSurface, .sendInput, .splitSurface, .destroyTab, .destroySurface, .renameTab, .prune, .removeWorktreeLayout,
       .setNotificationsEnabled, .enforceNotificationRetentionLimit, .setSelectedWorktreeID, .beginTabRename,
       .setTerminalHibernationEnabled, .toggleWindowModeForFocusedPane:
       return false
@@ -594,9 +618,9 @@ final class WorktreeTerminalManager {
     case .createTab, .createTabWithInput, .openFileWithScript, .ensureInitialTab, .stopRunScript, .stopScript,
       .runBlockingScript, .closeFocusedTab, .closeFocusedSurface, .performBindingAction,
       .performBindingActionOnSurface, .setImagePasteAgents, .startSearch, .searchSelection, .navigateSearchNext,
-      .navigateSearchPrevious, .selectTab, .selectTabAtIndex, .selectRelativeTab, .focusSurface,
+      .navigateSearchPrevious, .selectTab, .selectTabAtIndex, .selectRelativeTab, .focusSurface, .sendInput,
       .splitSurface, .destroyTab, .destroySurface, .renameTab, .beginTabRename,
-      .splitFocusedPane, .focusSplit, .toggleSplitZoom, .equalizeSplits,
+      .splitFocusedPane, .focusSplit, .toggleSplitZoom, .equalizeSplits, .resizePane,
       .splitPane, .focusPane, .closePane, .toggleZoomPane, .toggleWindowModeForPane, .moveTabToSplit:
       assertionFailure("Unhandled terminal command reached management handler: \(command)")
     }
@@ -689,16 +713,23 @@ final class WorktreeTerminalManager {
     appStore?.send(.terminals(.layouts(.element(id: worktreeID, action: action))))
   }
 
-  /// Routes a layout action targeting the focused pane's selected content.
-  private func sendFocusedContentLayoutAction(
+  private static let paneResizeStep: UInt16 = 10
+
+  /// Routes a layout action targeting the selected content of the pane
+  /// `paneToken` resolves to, or of the focused pane when there is no token.
+  private func sendSelectedContentLayoutAction(
     _ worktreeID: Worktree.ID,
+    paneToken: UUID? = nil,
     _ action: (ContentID) -> LayoutFeature.Action
   ) {
-    guard
-      let layout = layoutState(for: worktreeID)?.layout,
-      let contentID = layout.focusedPaneID
-        .flatMap({ layout.panes[id: $0]?.selectedTab?.content.id })
-    else { return }
+    guard let layout = layoutState(for: worktreeID)?.layout else { return }
+    let pane =
+      if let paneToken {
+        layout.pane(forToken: paneToken)
+      } else {
+        layout.focusedPaneID.flatMap { layout.panes[id: $0] }
+      }
+    guard let contentID = pane?.selectedTab?.content.id else { return }
     sendLayout(worktreeID, action(contentID))
   }
 
@@ -1311,6 +1342,13 @@ final class WorktreeTerminalManager {
   /// Whether a pane token (a pane, tab, or content id) resolves to a pane.
   func paneExists(worktreeID: Worktree.ID, token: UUID) -> Bool {
     resolvePane(token, in: worktreeID) != nil
+  }
+
+  func paneIsWindowed(worktreeID: Worktree.ID, token: UUID) -> Bool {
+    guard let layoutState = layoutState(for: worktreeID),
+      let pane = layoutState.layout.pane(forToken: token)
+    else { return false }
+    return layoutState.windowedPaneIDs.contains(pane.id)
   }
 
   /// Whether `tab move` is permitted: the tab's pane holds more than one tab

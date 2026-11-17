@@ -19,6 +19,7 @@ struct WorktreeMenuSnapshot: Equatable {
   var selectedPullRequestURL: URL?
   /// A git worktree (not a folder) is selected, so Open Pull Request can act.
   var hasSelectedGitWorktree: Bool = false
+  var canCustomizeSelectedAppearance: Bool = false
   var notificationIndicatorCount: Int = 0
   /// Rows with an agent parked on the user; gates Jump to Next Awaiting Agent.
   var needsYouCount: Int = 0
@@ -40,6 +41,7 @@ extension AppFeature.State {
       isInitialLoadComplete: repositories.isInitialLoadComplete,
       selectedPullRequestURL: pullRequestURL,
       hasSelectedGitWorktree: repositories.selectedWorktreeSlice.map { !$0.isFolder } ?? false,
+      canCustomizeSelectedAppearance: repositories.customizeSelectedAppearanceRequest != nil,
       notificationIndicatorCount: notificationIndicatorCount,
       needsYouCount: repositories.needsYouCount
     )
@@ -78,6 +80,9 @@ extension AppFeature.State {
       if old.hasSelectedGitWorktree != new.hasSelectedGitWorktree {
         diffs.append("hasSelectedGitWorktree")
       }
+      if old.canCustomizeSelectedAppearance != new.canCustomizeSelectedAppearance {
+        diffs.append("canCustomizeSelectedAppearance")
+      }
       if old.notificationIndicatorCount != new.notificationIndicatorCount {
         diffs.append("notificationIndicatorCount")
       }
@@ -114,7 +119,7 @@ extension AppFeature.Action {
       case .notificationReceived, .tabCreated, .tabClosed, .focusChanged,
         .taskStatusChanged, .blockingScriptCompleted, .commandPaletteToggleRequested,
         .setupScriptConsumed, .worktreeProjectionChanged, .surfaceCreated,
-        .tabRemoved, .tabRenamed, .worktreeStateTornDown,
+        .tabRemoved, .tabRenamed, .tabInputSent, .worktreeStateTornDown,
         .surfacesClosed, .agentHookEventReceived, .programStatusReceived, .programStatusPromptReturned,
         .terminalHasAnySurfaceChanged,
         .surfaceCreationFailed, .initialTabCreationFailed:
@@ -138,7 +143,7 @@ extension AppFeature.Action {
       .requestTerminateAllTerminalSessions, .newTerminal, .newTerminalInWorktree, .renameSelectedTerminalTab,
       .selectTerminalTabAtIndex, .selectNextTerminalTab, .selectPreviousTerminalTab,
       .splitTerminal, .toggleWindowModeForFocusedPane, .toggleSplitZoom,
-      .equalizeSplits, .focusSplit, .jumpToLatestUnread, .jumpToNextAwaiting,
+      .equalizeSplits, .focusSplit, .resizePane, .jumpToLatestUnread, .jumpToNextAwaiting,
       .menuBarWorktreeSelected, .markAllNotificationsRead, .runScript, .runNamedScript,
       .manageRepositoryScripts,
       .stopScript, .stopRunScripts, .closeTab, .closeSurface,
