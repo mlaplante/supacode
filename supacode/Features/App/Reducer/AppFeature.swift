@@ -592,6 +592,7 @@ struct AppFeature {
           .run { _ in
             // A worktree selected for the first time (fresh install, empty
             // migration) still needs its bootstrap tab; no-op when populated.
+            guard !worktree.isMissing else { return }
             await terminalClient.send(
               .ensureInitialTab(worktree, runSetupScriptIfNew: runSetupScriptIfNew, focusing: wantsFocus))
           },
@@ -1080,7 +1081,6 @@ struct AppFeature {
 
       case .renameSelectedTerminalTab:
         guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
-          !worktree.isMissing,
           let tabID = terminalClient.selectedTabID(worktree.id)
         else {
           return .none
@@ -1093,9 +1093,7 @@ struct AppFeature {
         // Works regardless of first responder (menu key-equivalent), so ⌘-number
         // switches tabs even when the sidebar holds focus. The index is clamped to
         // the last tab inside the terminal state.
-        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
-          !worktree.isMissing
-        else {
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
           return .none
         }
         return .run { _ in
@@ -1103,9 +1101,7 @@ struct AppFeature {
         }
 
       case .selectNextTerminalTab:
-        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
-          !worktree.isMissing
-        else {
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
           return .none
         }
         return .run { _ in
@@ -1113,9 +1109,7 @@ struct AppFeature {
         }
 
       case .selectPreviousTerminalTab:
-        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
-          !worktree.isMissing
-        else {
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
           return .none
         }
         return .run { _ in
@@ -1133,9 +1127,7 @@ struct AppFeature {
         }
 
       case .toggleWindowModeForFocusedPane:
-        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
-          !worktree.isMissing
-        else {
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
           return .none
         }
         return .run { _ in
@@ -1143,9 +1135,7 @@ struct AppFeature {
         }
 
       case .toggleSplitZoom:
-        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
-          !worktree.isMissing
-        else {
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
           return .none
         }
         return .run { _ in
@@ -1153,9 +1143,7 @@ struct AppFeature {
         }
 
       case .equalizeSplits:
-        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
-          !worktree.isMissing
-        else {
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
           return .none
         }
         return .run { _ in
@@ -1163,9 +1151,7 @@ struct AppFeature {
         }
 
       case .focusSplit(let direction):
-        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
-          !worktree.isMissing
-        else {
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
           return .none
         }
         return .run { _ in
@@ -1173,9 +1159,7 @@ struct AppFeature {
         }
 
       case .resizePane(let direction):
-        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID),
-          !worktree.isMissing
-        else {
+        guard let worktree = state.repositories.worktree(for: state.repositories.selectedWorktreeID) else {
           return .none
         }
         return .run { _ in
@@ -1893,8 +1877,6 @@ struct AppFeature {
         // Ghostty void actions emit bare tag names; no colon.
         let command: TerminalClient.Command
         if action == "prompt_surface_title" || action == "prompt_tab_title" {
-          // Skip missing worktrees so the palette matches the rename shortcut's guard.
-          guard !worktree.isMissing else { return .none }
           // Capture the focused tab synchronously so a fast tab switch between dispatch
           // and effect execution can't redirect the rename to the wrong tab.
           let tabID = terminalClient.selectedTabID(worktree.id)
